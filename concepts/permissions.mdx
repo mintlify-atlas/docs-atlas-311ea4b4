@@ -1,0 +1,531 @@
+---
+title: Permissions
+description: Understanding the permission system in the Better Auth Invite Plugin
+---
+
+The Better Auth Invite Plugin provides a flexible permission system that controls who can create, accept, cancel, and reject invitations. You can use simple boolean flags, custom functions, or integrate with the Better Auth admin plugin for role-based access control.
+
+## Permission options overview
+
+The plugin provides four permission options:
+
+```typescript
+type InviteOptions = {
+  canCreateInvite?: boolean | Function | Permissions;
+  canAcceptInvite?: boolean | Function | Permissions;
+  canCancelInvite?: boolean | Function | Permissions;
+  canRejectInvite?: boolean | Function | Permissions;
+};
+```
+
+Source: [src/types.ts:23-84](file:///home/daytona/workspace/source/src/types.ts)
+
+## Boolean flags
+
+The simplest permission configuration uses boolean values.
+
+### Allow all (default)
+
+```typescript
+import { invite } from "better-auth-invite";
+
+export const auth = betterAuth({
+  plugins: [
+    invite({
+      canCreateInvite: true,  // Default
+      canAcceptInvite: true,  // Default
+      canCancelInvite: true,  // Default
+      canRejectInvite: true,  // Default
+    }),
+  ],
+});
+```
+
+<Note>
+All permissions default to `true`, allowing any authenticated user to perform the action (subject to other constraints like email matching for private invites).
+</Note>
+
+### Deny all
+
+```typescript
+invite({
+  canCreateInvite: false,  // Nobody can create invites
+});
+```
+
+When set to `false`, the permission check fails with an error:
+
+```typescript
+if (!canCreateInvite) {
+  throw ctx.error("BAD_REQUEST", {
+    message: "User does not have sufficient permissions to create invite",
+    errorCode: "INSUFFICIENT_PERMISSIONS",
+  });
+}
+```
+
+Source: [src/routes/create-invite.ts:89-93](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+## Permission functions
+
+For dynamic permission logic, provide a function that returns a boolean.
+
+### canCreateInvite function
+
+```typescript
+invite({
+  canCreateInvite: async ({ invitedUser, inviterUser, ctx }) => {
+    // Only admins can create invites
+    return inviterUser.role === "admin";
+  },
+});
+```
+
+Function signature:
+
+```typescript
+canCreateInvite?: (data: {
+  invitedUser: {
+    email?: string;
+    role: string;
+  };
+  inviterUser: UserWithRole;
+  ctx: GenericEndpointContext;
+}) => Promise<boolean> | boolean;
+```
+
+Source: [src/types.ts:23-32](file:///home/daytona/workspace/source/src/types.ts)
+
+### canAcceptInvite function
+
+```typescript
+invite({
+  canAcceptInvite: async ({ invitedUser, newAccount }) => {
+    // Only new accounts can accept invites
+    return newAccount === true;
+  },
+});
+```
+
+Function signature:
+
+```typescript
+canAcceptInvite?: (data: {
+  invitedUser: UserWithRole;
+  newAccount: boolean;
+}) => Promise<boolean> | boolean;
+```
+
+Source: [src/types.ts:46-51](file:///home/daytona/workspace/source/src/types.ts)
+
+### canCancelInvite function
+
+```typescript
+invite({
+  canCancelInvite: async ({ inviterUser, invitation, ctx }) => {
+    // Can only cancel within 24 hours
+    const hoursSinceCreated = 
+      (Date.now() - invitation.createdAt.getTime()) / (1000 * 60 * 60);
+    return hoursSinceCreated < 24;
+  },
+});
+```
+
+Function signature:
+
+```typescript
+canCancelInvite?: (data: {
+  inviterUser: UserWithRole;
+  invitation: InviteTypeWithId;
+  ctx: GenericEndpointContext;
+}) => Promise<boolean> | boolean;
+```
+
+Source: [src/types.ts:61-67](file:///home/daytona/workspace/source/src/types.ts)
+
+<Note>
+Regardless of this option, only the user who created the invite can cancel it. This is enforced before the permission function runs:
+
+```typescript
+if (invitation.createdByUserId !== inviterUser.id) {
+  throw error("INSUFFICIENT_PERMISSIONS");
+}
+```
+
+Source: [src/routes/cancel-invite.ts:82-86](file:///home/daytona/workspace/source/src/routes/cancel-invite.ts)
+</Note>
+
+### canRejectInvite function
+
+```typescript
+invite({
+  canRejectInvite: async ({ inviteeUser, invitation, ctx }) => {
+    // Can only reject if not yet expired
+    return new Date() < invitation.expiresAt;
+  },
+});
+```
+
+Function signature:
+
+```typescript
+canRejectInvite?: (data: {
+  inviteeUser: UserWithRole;
+  invitation: InviteTypeWithId;
+  ctx: GenericEndpointContext;
+}) => Promise<boolean> | boolean;
+```
+
+Source: [src/types.ts:77-83](file:///home/daytona/workspace/source/src/types.ts)
+
+<Note>
+Regardless of this option, only the invitee can reject private invites. Public invites cannot be rejected at all:
+
+```typescript
+if (inviteType === "public" || invitation.email !== inviteeUser.email) {
+  throw error("CANT_REJECT_INVITE");
+}
+```
+
+Source: [src/routes/reject-invite.ts:84-88](file:///home/daytona/workspace/source/src/routes/reject-invite.ts)
+</Note>
+
+## Permission objects (RBAC)
+
+For advanced role-based access control, integrate with the Better Auth admin plugin.
+
+### Permission object structure
+
+```typescript
+type Permissions = {
+  statement: string;      // Resource/action identifier
+  permissions: string[];  // Required permission values
+};
+```
+
+Source: [src/types.ts:358-361](file:///home/daytona/workspace/source/src/types.ts)
+
+### Using permission objects
+
+```typescript
+import { invite } from "better-auth-invite";
+import { admin } from "better-auth/plugins";
+
+export const auth = betterAuth({
+  plugins: [
+    admin(),  // Required for permission objects
+    invite({
+      canCreateInvite: {
+        statement: "invite",
+        permissions: ["create"],
+      },
+      canAcceptInvite: {
+        statement: "invite",
+        permissions: ["accept"],
+      },
+    }),
+  ],
+});
+```
+
+### Permission validation flow
+
+When you use a permission object, the plugin:
+
+1. Checks if the admin plugin is installed
+2. Calls the admin plugin's `userHasPermission` endpoint
+3. Returns the result
+
+```typescript
+export const checkPermissions = async (
+  ctx: GenericEndpointContext,
+  permissions: Permissions,
+) => {
+  const session = ctx.context.session;
+  if (!session?.session) {
+    throw ctx.error("UNAUTHORIZED");
+  }
+
+  const adminPlugin = getPlugin("admin", ctx.context);
+  if (!adminPlugin) {
+    throw ctx.error("FAILED_DEPENDENCY", {
+      message: "Admin plugin is not set-up.",
+    });
+  }
+
+  try {
+    return await adminPlugin.endpoints.userHasPermission({
+      ...ctx,
+      body: {
+        userId: session.user.id,
+        permissions: { 
+          [permissions.statement]: permissions.permissions 
+        },
+      },
+    });
+  } catch {
+    return false;
+  }
+};
+```
+
+Source: [src/utils.ts:245-279](file:///home/daytona/workspace/source/src/utils.ts)
+
+<Warning>
+If you use permission objects without the admin plugin installed, you'll get an error:
+
+```
+Admin plugin is not set-up.
+```
+
+Make sure to install the admin plugin first:
+
+```typescript
+import { admin } from "better-auth/plugins";
+
+plugins: [admin(), invite({ /* ... */ })];
+```
+</Warning>
+
+## Permission evaluation order
+
+Permissions are evaluated in this order:
+
+### For canCreateInvite
+
+```typescript
+// 1. Get permission option
+const canCreateInviteOption = 
+  typeof options.canCreateInvite === "function"
+    ? await options.canCreateInvite({ invitedUser, inviterUser, ctx })
+    : options.canCreateInvite;
+
+// 2. Check if it's a permission object
+const canCreateInvite = 
+  typeof canCreateInviteOption === "object"
+    ? await checkPermissions(ctx, canCreateInviteOption)
+    : canCreateInviteOption;
+
+// 3. Throw error if denied
+if (!canCreateInvite) {
+  throw error("INSUFFICIENT_PERMISSIONS");
+}
+```
+
+Source: [src/routes/create-invite.ts:76-93](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+### For canAcceptInvite
+
+```typescript
+// 1. Validate email (private invites only)
+if (invitation.email && invitation.email !== invitedUser.email) {
+  throw error("INVALID_EMAIL");
+}
+
+// 2. Validate status
+if (invitation.status !== "pending") {
+  throw error("INVALID_TOKEN");
+}
+
+// 3. Get permission option
+const canAcceptInviteOptions = 
+  typeof options.canAcceptInvite === "function"
+    ? await options.canAcceptInvite({ invitedUser, newAccount })
+    : options.canAcceptInvite;
+
+// 4. Check if it's a permission object
+const canAcceptInvite = 
+  typeof canAcceptInviteOptions === "object"
+    ? await checkPermissions(ctx, canAcceptInviteOptions)
+    : canAcceptInviteOptions;
+
+// 5. Throw error if denied
+if (!canAcceptInvite) {
+  throw error("CANT_ACCEPT_INVITE");
+}
+```
+
+Source: [src/utils.ts:114-137](file:///home/daytona/workspace/source/src/utils.ts)
+
+## Custom permission examples
+
+<AccordionGroup>
+  <Accordion title="Role-based invite creation">
+    ```typescript
+    invite({
+      canCreateInvite: async ({ inviterUser, invitedUser }) => {
+        // Admins can invite anyone
+        if (inviterUser.role === "admin") return true;
+        
+        // Managers can only invite members
+        if (inviterUser.role === "manager") {
+          return invitedUser.role === "member";
+        }
+        
+        // Others cannot invite
+        return false;
+      },
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Rate limit invite creation">
+    ```typescript
+    import { kv } from "./kv-store";
+    
+    invite({
+      canCreateInvite: async ({ inviterUser }) => {
+        const key = `invite:ratelimit:${inviterUser.id}`;
+        const count = await kv.get(key) || 0;
+        
+        // Max 5 invites per day
+        if (count >= 5) return false;
+        
+        await kv.set(key, count + 1, { ex: 86400 });
+        return true;
+      },
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Domain-based restrictions">
+    ```typescript
+    invite({
+      canCreateInvite: async ({ invitedUser, inviterUser }) => {
+        // Can only invite users from same domain
+        const inviterDomain = inviterUser.email.split("@")[1];
+        const inviteeDomain = invitedUser.email?.split("@")[1];
+        
+        return inviterDomain === inviteeDomain;
+      },
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Existing user restrictions">
+    ```typescript
+    invite({
+      canAcceptInvite: async ({ invitedUser, newAccount }) => {
+        // Only new users can accept "member" role invites
+        if (invitedUser.role === "member" && !newAccount) {
+          return false;
+        }
+        
+        return true;
+      },
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Time-based permissions">
+    ```typescript
+    invite({
+      canCreateInvite: async ({ ctx }) => {
+        // Only allow invite creation during business hours
+        const hour = new Date().getHours();
+        const isBusinessHours = hour >= 9 && hour < 17;
+        
+        return isBusinessHours;
+      },
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Audit logging">
+    ```typescript
+    invite({
+      canCreateInvite: async ({ inviterUser, invitedUser, ctx }) => {
+        const hasPermission = inviterUser.role === "admin";
+        
+        // Log permission check
+        await logAudit({
+          action: "invite.create.permission",
+          userId: inviterUser.id,
+          targetEmail: invitedUser.email,
+          allowed: hasPermission,
+          timestamp: new Date(),
+        });
+        
+        return hasPermission;
+      },
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Combining with hooks
+
+Permissions run before hooks, allowing you to layer validation:
+
+```typescript
+invite({
+  // Permission check runs first
+  canCreateInvite: async ({ inviterUser }) => {
+    return inviterUser.role === "admin";
+  },
+  
+  inviteHooks: {
+    // Hook runs after permission check passes
+    beforeCreateInvite: async ({ ctx }) => {
+      // Additional validation or side effects
+      await notifyAdmins({
+        message: `${ctx.context.session.user.email} is creating an invite`,
+      });
+    },
+  },
+});
+```
+
+Source: [src/routes/create-invite.ts:98](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+## Permission vs validation
+
+Understand the difference between permissions and built-in validation:
+
+### Built-in validations (always enforced)
+
+- Email must be valid format
+- Token must not be expired
+- Invitation must not exceed max uses
+- Only creator can cancel an invite
+- Only recipient can reject a private invite
+- Public invites cannot be rejected
+
+### Permissions (customizable)
+
+- Who can create invites
+- Who can accept invites
+- Additional constraints on cancellation
+- Additional constraints on rejection
+
+<Check>
+Use permissions for **authorization** ("Is this user allowed?")  
+Built-in validations handle **data integrity** ("Is this request valid?")
+</Check>
+
+## Error handling
+
+Permission failures return specific error codes:
+
+```typescript
+try {
+  await client.invite.create({
+    email: "user@example.com",
+    role: "admin",
+  });
+} catch (error) {
+  if (error.code === "INSUFFICIENT_PERMISSIONS") {
+    console.log("You don't have permission to create invites");
+  }
+}
+```
+
+Error codes:
+
+- `INSUFFICIENT_PERMISSIONS` - Permission check failed for create/cancel
+- `CANT_ACCEPT_INVITE` - Permission check failed for accept
+- `CANT_REJECT_INVITE` - Permission check failed for reject
+- `UNAUTHORIZED` - No session when using permission objects
+- `FAILED_DEPENDENCY` - Admin plugin not installed when using permission objects
+
+Source: [src/constants.ts:3-16](file:///home/daytona/workspace/source/src/constants.ts)

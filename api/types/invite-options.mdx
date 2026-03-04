@@ -1,0 +1,203 @@
+---
+title: InviteOptions Type
+description: Configuration options type for the Better Auth Invite Plugin
+---
+
+## Overview
+
+The `InviteOptions` type defines the configuration interface for the invite plugin. It provides comprehensive control over invitation behavior, permissions, token generation, email sending, and lifecycle hooks.
+
+For detailed documentation of each option, see the [Options](/api/options) page.
+
+## Type Definition
+
+```typescript
+import type { GenericEndpointContext } from "better-auth";
+import type { InferOptionSchema, UserWithRole } from "better-auth/plugins";
+import type { InviteSchema } from "./schema";
+
+export type InviteOptions = {
+  getDate?: () => Date;
+  canCreateInvite?: ((data: {
+    invitedUser: { email?: string; role: string; };
+    inviterUser: UserWithRole;
+    ctx: GenericEndpointContext;
+  }) => Promise<boolean> | boolean) | boolean | Permissions;
+  canAcceptInvite?: ((data: {
+    invitedUser: UserWithRole;
+    newAccount: boolean;
+  }) => Promise<boolean> | boolean) | boolean | Permissions;
+  canCancelInvite?: ((data: {
+    inviterUser: UserWithRole;
+    invitation: InviteTypeWithId;
+    ctx: GenericEndpointContext;
+  }) => Promise<boolean> | boolean) | boolean | Permissions;
+  canRejectInvite?: ((data: {
+    inviteeUser: UserWithRole;
+    invitation: InviteTypeWithId;
+    ctx: GenericEndpointContext;
+  }) => Promise<boolean> | boolean) | boolean | Permissions;
+  generateToken?: () => string;
+  defaultTokenType?: TokensType;
+  defaultRedirectToSignUp?: string;
+  defaultRedirectToSignIn?: string;
+  defaultRedirectAfterUpgrade?: string;
+  defaultShareInviterName?: boolean;
+  defaultMaxUses?: number;
+  defaultSenderResponse?: "token" | "url";
+  defaultSenderResponseRedirect?: "signUp" | "signIn";
+  sendUserInvitation?: (data: {
+    email: string;
+    name?: string;
+    role: string;
+    url: string;
+    token: string;
+    newAccount: boolean;
+  }, request?: Request) => Promise<void> | void;
+  sendUserRoleUpgrade?: (data: {
+    email: string;
+    role: string;
+    url: string;
+    token: string;
+  }, request?: Request) => Promise<void> | void;
+  invitationTokenExpiresIn?: number;
+  inviteCookieMaxAge?: number;
+  cleanupInvitesOnDecision?: boolean;
+  cleanupInvitesAfterMaxUses?: boolean;
+  defaultCustomInviteUrl?: string;
+  onInvitationUsed?: (data: {
+    invitedUser: UserWithRole;
+    newUser: UserWithRole;
+    newAccount: boolean;
+  }, request?: Request) => Promise<void> | void;
+  schema?: InferOptionSchema<InviteSchema>;
+  inviteHooks?: {
+    beforeCreateInvite?: (data: { ctx: GenericEndpointContext; }) => Promise<void> | void;
+    afterCreateInvite?: (data: { ctx: GenericEndpointContext; invitation: InviteTypeWithId; }) => Promise<void> | void;
+    beforeAcceptInvite?: (data: { ctx: GenericEndpointContext; invitedUser: UserWithRole; }) => Promise<{ user?: UserWithRole }> | Promise<void> | { user?: UserWithRole } | void;
+    afterAcceptInvite?: (data: { ctx: GenericEndpointContext; invitation: InviteTypeWithId; invitedUser: UserWithRole; }) => Promise<void> | void;
+    beforeCancelInvite?: (data: { ctx: GenericEndpointContext; invitation: InviteTypeWithId; }) => Promise<void> | void;
+    afterCancelInvite?: (data: { ctx: GenericEndpointContext; invitation: InviteTypeWithId; }) => Promise<void> | void;
+    beforeRejectInvite?: (data: { ctx: GenericEndpointContext; invitation: InviteTypeWithId; }) => Promise<void> | void;
+    afterRejectInvite?: (data: { ctx: GenericEndpointContext; invitation: InviteTypeWithId; }) => Promise<void> | void;
+  };
+};
+```
+
+## NewInviteOptions Type
+
+Internal type with required defaults:
+
+```typescript
+type MakeRequired<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>;
+
+export type NewInviteOptions = MakeRequired<
+  InviteOptions,
+  | "getDate"
+  | "invitationTokenExpiresIn"
+  | "defaultShareInviterName"
+  | "defaultSenderResponse"
+  | "defaultSenderResponseRedirect"
+  | "defaultTokenType"
+  | "defaultRedirectToSignIn"
+  | "defaultRedirectToSignUp"
+  | "canCreateInvite"
+  | "canAcceptInvite"
+  | "canCancelInvite"
+  | "canRejectInvite"
+>;
+```
+
+The `NewInviteOptions` type is used internally after applying defaults from `resolveInviteOptions`.
+
+## Usage
+
+### Basic Configuration
+
+```typescript
+import { invite } from "@better-auth/invite";
+import type { InviteOptions } from "@better-auth/invite";
+
+const inviteOptions: InviteOptions = {
+  sendUserInvitation: async (data) => {
+    await sendEmail({
+      to: data.email,
+      subject: "You've been invited!",
+      body: `Click here: ${data.url}`,
+    });
+  },
+};
+
+const auth = betterAuth({
+  plugins: [invite(inviteOptions)],
+});
+```
+
+### With Type Safety
+
+```typescript
+import type { InviteOptions } from "@better-auth/invite";
+
+const createInviteConfig = (): InviteOptions => {
+  return {
+    canCreateInvite: async ({ inviterUser }) => {
+      return inviterUser.role === "admin";
+    },
+    defaultTokenType: "code",
+    invitationTokenExpiresIn: 86400, // 24 hours
+    sendUserInvitation: async (data, request) => {
+      // Type-safe email data
+      const { email, name, role, url, token, newAccount } = data;
+      await emailService.send({ /* ... */ });
+    },
+  };
+};
+```
+
+### Extending with Custom Schema
+
+```typescript
+import type { InviteOptions } from "@better-auth/invite";
+import type { InferOptionSchema } from "better-auth/plugins";
+
+const inviteOptions: InviteOptions = {
+  schema: {
+    invite: {
+      fields: {
+        customField: {
+          type: "string",
+          required: false,
+        },
+        metadata: {
+          type: "json",
+          required: false,
+        },
+      },
+    },
+  },
+  sendUserInvitation: async (data) => {
+    // Implementation
+  },
+};
+```
+
+## Related Types
+
+- [Permissions](/api/types/permissions) - Permission configuration type
+- [InviteType](/api/types/invite-type) - Invitation data structure
+- `TokensType` - `"token" | "code" | "custom"`
+- `UserWithRole` - Better Auth user with role information
+- `GenericEndpointContext` - Better Auth endpoint context
+
+## Source Code Reference
+
+Type definition: `src/types.ts:5-303`
+
+NewInviteOptions: `src/types.ts:307-321`
+
+## Related
+
+- [Options](/api/options) - Detailed documentation of each option
+- [invite()](/api/invite) - Main plugin function
+- [InviteType](/api/types/invite-type) - Invitation data structure
+- [Permissions](/api/types/permissions) - Permission configuration

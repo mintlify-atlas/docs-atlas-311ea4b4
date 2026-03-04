@@ -1,0 +1,309 @@
+---
+title: How it works
+description: Understanding the complete invitation flow in the Better Auth Invite Plugin
+---
+
+The Better Auth Invite Plugin implements a comprehensive invitation system with cookie-based activation and role management. This guide explains the complete lifecycle from invite creation to acceptance.
+
+## Invitation lifecycle
+
+The invitation process follows a structured flow through multiple stages:
+
+1. **Creation** - An authorized user creates an invitation
+2. **Distribution** - The invitation is delivered via email or shareable link
+3. **Activation** - The recipient activates the invitation token
+4. **Authentication** - New users sign up or existing users sign in
+5. **Acceptance** - The invitation is consumed and the role is applied
+
+## Database architecture
+
+The plugin uses two database tables to manage invitations:
+
+### Invite table
+
+Stores invitation records with the following fields:
+
+```typescript
+{
+  id: string;
+  token: string;              // Unique invitation token
+  createdAt: Date;
+  expiresAt: Date;
+  maxUses: number;            // How many times it can be used
+  createdByUserId: string;    // References user.id
+  redirectToAfterUpgrade?: string;
+  shareInviterName: boolean;
+  email?: string;             // Present for private invites
+  role: string;               // Role to assign
+  newAccount?: boolean;       // Whether invitee needs to create account
+  status: "pending" | "rejected" | "canceled" | "used";
+}
+```
+
+Source: [src/schema.ts:4-23](file:///home/daytona/workspace/source/src/schema.ts)
+
+### InviteUse table
+
+Tracks each use of an invitation, enabling multi-use invites:
+
+```typescript
+{
+  id: string;
+  inviteId: string;          // References invite.id
+  usedAt: Date;
+  usedByUserId: string;      // References user.id
+}
+```
+
+Source: [src/schema.ts:25-38](file:///home/daytona/workspace/source/src/schema.ts)
+
+## Cookie-based activation mechanism
+
+The plugin uses a secure, signed cookie to handle invitation activation across the authentication flow. This is critical for new users who need to sign up before accepting an invitation.
+
+### Activation flow for unauthenticated users
+
+1. User clicks invitation link with token
+2. Plugin validates the token and checks:
+   - Token exists and hasn't expired
+   - Invitation hasn't reached max uses
+   - Status is "pending"
+3. Plugin creates a signed cookie named `invite_token` containing the invitation token
+4. User is redirected to sign-up or sign-in page
+5. After authentication, the hook system detects the cookie and completes acceptance
+
+Source: [src/routes/activate-invite-logic.ts:88-104](file:///home/daytona/workspace/source/src/routes/activate-invite-logic.ts)
+
+### Cookie configuration
+
+The invitation cookie has a configurable max age:
+
+```typescript
+invite({
+  inviteCookieMaxAge: 600, // 10 minutes (default)
+});
+```
+
+This controls how long users have to complete the sign-in/sign-up flow before the cookie expires.
+
+## Hook execution order
+
+The plugin provides lifecycle hooks that execute at specific points in the invitation flow:
+
+### Create invitation flow
+
+1. `beforeCreateInvite` - Before invitation record is created
+2. Invitation is created in database
+3. Email is sent (for private invites)
+4. `afterCreateInvite` - After invitation is successfully created
+
+Source: [src/routes/create-invite.ts:98](file:///home/daytona/workspace/source/src/routes/create-invite.ts) and [src/routes/create-invite.ts:164](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+### Accept invitation flow
+
+1. `beforeAcceptInvite` - Before role upgrade is applied
+   - Can return modified user object to override invited user data
+2. User role is updated in database
+3. Session cookie is updated with new role
+4. InviteUse record is created
+5. `onInvitationUsed` callback is triggered (if configured)
+6. `afterAcceptInvite` - After invitation is fully processed
+7. User is redirected to `redirectToAfterUpgrade` (if set)
+
+Source: [src/hooks.ts:96-135](file:///home/daytona/workspace/source/src/hooks.ts)
+
+### Cancel invitation flow
+
+1. `beforeCancelInvite` - Before invitation is canceled
+2. Invitation status updated to "canceled" or deleted (based on `cleanupInvitesOnDecision`)
+3. `afterCancelInvite` - After cancellation is complete
+
+Source: [src/routes/cancel-invite.ts:116-125](file:///home/daytona/workspace/source/src/routes/cancel-invite.ts)
+
+### Reject invitation flow
+
+1. `beforeRejectInvite` - Before invitation is rejected
+2. Invitation status updated to "rejected" or deleted (based on `cleanupInvitesOnDecision`)
+3. `afterRejectInvite` - After rejection is complete
+
+Source: [src/routes/reject-invite.ts:118-127](file:///home/daytona/workspace/source/src/routes/reject-invite.ts)
+
+## Authentication hook integration
+
+The plugin automatically hooks into Better Auth's authentication endpoints to detect and process pending invitations:
+
+```typescript
+// Matches these authentication endpoints:
+[
+  "/sign-up/email",
+  "/sign-in/email",
+  "/sign-in/email-otp",
+  "/callback/:id",      // For social logins
+  "/verify-email"
+]
+```
+
+When any of these endpoints complete successfully, the plugin:
+
+1. Checks for the `invite_token` cookie
+2. Validates the invitation
+3. Applies the role upgrade
+4. Deletes the cookie
+5. Redirects the user
+
+Source: [src/hooks.ts:15-21](file:///home/daytona/workspace/source/src/hooks.ts)
+
+<Note>
+For social logins, the `newSession` is not available at the end of the initial `/sign-in` call, so the hook must trigger on the `/callback/:id` endpoint instead.
+</Note>
+
+## Complete flow example
+
+### Private invite for new user
+
+```typescript
+// 1. Admin creates invitation
+await client.invite.create({
+  email: "user@example.com",
+  role: "member",
+});
+
+// 2. Email sent with link: /invite/{token}?callbackURL=/auth/sign-up
+
+// 3. User clicks link
+// - Token validated
+// - Cookie set with token
+// - Redirected to /auth/sign-up
+
+// 4. User completes sign-up
+// - New account created
+// - Hook detects cookie
+// - Role immediately set to "member"
+// - User logged in with correct role
+```
+
+### Public invite for existing user
+
+```typescript
+// 1. Admin creates shareable invitation
+const { message } = await client.invite.create({
+  role: "member",
+  senderResponse: "url",
+});
+// message contains shareable URL
+
+// 2. User (already logged in) visits URL
+
+// 3. Activation endpoint
+// - Token validated
+// - User already authenticated
+// - Role immediately upgraded to "member"
+// - Session cookie updated
+// - Redirected to dashboard
+```
+
+## Role upgrade vs new account
+
+The plugin automatically determines whether an invitation is for a new account or a role upgrade:
+
+```typescript
+// Check if user exists
+const invitedUser = await adapter.findUserByEmail(email);
+const newAccount = !invitedUser;
+
+// Store in invitation record
+await adapter.createInvite({
+  // ...
+  newAccount,  // true = sign-up, false = role upgrade
+});
+```
+
+This information is:
+- Stored in the invitation record
+- Passed to email templates
+- Available in permission checks
+- Provided to hooks and callbacks
+
+Source: [src/routes/create-invite.ts:100-116](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+## Security considerations
+
+### Token validation
+
+Every activation validates:
+
+```typescript
+// 1. Token exists
+if (!invitation) throw error("INVALID_TOKEN");
+
+// 2. Not expired
+if (getDate() > invitation.expiresAt) throw error("INVALID_TOKEN");
+
+// 3. Usage limit not exceeded
+const timesUsed = await adapter.countInvitationUses(invitation.id);
+if (!(timesUsed < invitation.maxUses)) throw error("INVALID_TOKEN");
+
+// 4. Status is pending
+if (invitation.status !== "pending") throw error("INVALID_TOKEN");
+```
+
+Source: [src/routes/activate-invite-logic.ts:29-47](file:///home/daytona/workspace/source/src/routes/activate-invite-logic.ts)
+
+### Email verification for private invites
+
+Private invites validate the recipient's email:
+
+```typescript
+if (invitation.email && invitation.email !== invitedUser.email) {
+  throw error("INVALID_EMAIL");
+}
+```
+
+Source: [src/utils.ts:114-116](file:///home/daytona/workspace/source/src/utils.ts)
+
+### Signed cookies
+
+Invitation cookies are signed with your Better Auth secret:
+
+```typescript
+await ctx.setSignedCookie(
+  inviteCookie.name,
+  token,
+  ctx.context.secret,
+  inviteCookie.attributes
+);
+```
+
+Source: [src/routes/activate-invite-logic.ts:96-101](file:///home/daytona/workspace/source/src/routes/activate-invite-logic.ts)
+
+## Cleanup strategies
+
+The plugin offers two cleanup options:
+
+### Cleanup on decision
+
+```typescript
+invite({
+  cleanupInvitesOnDecision: true,
+});
+```
+
+When enabled, invitations and their uses are permanently deleted when canceled or rejected.
+
+Source: [src/routes/cancel-invite.ts:118-123](file:///home/daytona/workspace/source/src/routes/cancel-invite.ts)
+
+### Cleanup after max uses
+
+```typescript
+invite({
+  cleanupInvitesAfterMaxUses: true,
+});
+```
+
+When enabled, invitations are deleted when they reach their maximum number of uses.
+
+Source: [src/utils.ts:161-168](file:///home/daytona/workspace/source/src/utils.ts)
+
+<Warning>
+If cleanup is disabled, invitations remain in the database with their status updated. This preserves audit history but requires manual cleanup.
+</Warning>

@@ -1,0 +1,506 @@
+---
+title: Custom Email Handler
+description: Implement sendUserInvitation with real email services like Resend, SendGrid, and Nodemailer
+---
+
+This guide shows how to implement the `sendUserInvitation` function with popular email services.
+
+## Overview
+
+The `sendUserInvitation` function is called whenever a private invitation (with an email address) is created. You'll learn how to:
+- Integrate with Resend, SendGrid, and Nodemailer
+- Create beautiful HTML email templates
+- Handle both new invitations and role upgrades
+- Include dynamic data in your emails
+
+## Email Service Implementations
+
+<Tabs>
+  <Tab title="Resend">
+
+### Using Resend
+
+Resend is a modern email API with excellent TypeScript support.
+
+<Steps>
+
+<Step title="Install Resend">
+
+```bash
+npm install resend
+```
+
+</Step>
+
+<Step title="Setup Environment">
+
+```env .env
+RESEND_API_KEY=re_xxxxxxxxxxxxx
+NEXT_PUBLIC_APP_URL=https://yourdomain.com
+```
+
+</Step>
+
+<Step title="Configure Better Auth">
+
+```ts lib/auth.ts
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth-invite-plugin";
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+export const auth = betterAuth({
+  database: {
+    // Your database config
+  },
+  plugins: [
+    invite({
+      async sendUserInvitation({ email, name, role, url, token, newAccount }) {
+        const appName = "MyApp";
+        const subject = newAccount
+          ? `You're invited to join ${appName}!`
+          : `Your role has been upgraded to ${role}`;
+
+        await resend.emails.send({
+          from: `${appName} <noreply@yourdomain.com>`,
+          to: email,
+          subject,
+          html: `
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              </head>
+              <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                  <h1 style="color: white; margin: 0;">${newAccount ? '🎉 You\'re Invited!' : '⭐ Role Upgrade'}</h1>
+                </div>
+                
+                <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+                  <h2 style="color: #333; margin-top: 0;">Hello ${name || 'there'}!</h2>
+                  
+                  ${newAccount 
+                    ? `<p>You've been invited to join <strong>${appName}</strong> with the role of <strong>${role}</strong>.</p>`
+                    : `<p>Great news! Your role has been upgraded to <strong>${role}</strong>. You now have access to additional features.</p>`
+                  }
+                  
+                  <div style="text-align: center; margin: 30px 0;">
+                    <a href="${url}" 
+                       style="display: inline-block; background: #667eea; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                      ${newAccount ? 'Accept Invitation' : 'Activate New Role'}
+                    </a>
+                  </div>
+                  
+                  <p style="color: #666; font-size: 14px;">
+                    If you didn't expect this invitation, you can safely ignore this email.
+                  </p>
+                  
+                  <p style="color: #999; font-size: 12px; margin-top: 30px;">
+                    Invitation code: <code style="background: #e0e0e0; padding: 2px 6px; border-radius: 3px;">${token}</code>
+                  </p>
+                </div>
+              </body>
+            </html>
+          `,
+        });
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+
+</Steps>
+
+  </Tab>
+  
+  <Tab title="SendGrid">
+
+### Using SendGrid
+
+SendGrid is a reliable email delivery service with extensive features.
+
+<Steps>
+
+<Step title="Install SendGrid">
+
+```bash
+npm install @sendgrid/mail
+```
+
+</Step>
+
+<Step title="Setup Environment">
+
+```env .env
+SENDGRID_API_KEY=SG.xxxxxxxxxxxxx
+```
+
+</Step>
+
+<Step title="Configure Better Auth">
+
+```ts lib/auth.ts
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth-invite-plugin";
+import sgMail from "@sendgrid/mail";
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+
+export const auth = betterAuth({
+  database: {
+    // Your database config
+  },
+  plugins: [
+    invite({
+      async sendUserInvitation({ email, name, role, url, token, newAccount }) {
+        const msg = {
+          to: email,
+          from: {
+            email: "noreply@yourdomain.com",
+            name: "MyApp Team",
+          },
+          subject: newAccount
+            ? "You're invited to join MyApp!"
+            : `Your role has been upgraded to ${role}`,
+          text: newAccount
+            ? `Hello ${name || 'there'}! You've been invited to join MyApp. Click here to accept: ${url}`
+            : `Hello ${name}! Your role has been upgraded to ${role}. Activate your new role: ${url}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <h1 style="color: #4f46e5;">${newAccount ? 'Welcome to MyApp!' : 'Role Upgrade'}</h1>
+              <p>Hello ${name || 'there'}!</p>
+              ${newAccount
+                ? `<p>You've been invited to join our platform with the <strong>${role}</strong> role.</p>`
+                : `<p>Your role has been upgraded to <strong>${role}</strong>!</p>`
+              }
+              <p style="margin: 30px 0;">
+                <a href="${url}" 
+                   style="background: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+                  ${newAccount ? 'Accept Invitation' : 'Activate New Role'}
+                </a>
+              </p>
+              <p style="color: #666; font-size: 14px;">
+                If you can't click the button, copy and paste this link into your browser:<br>
+                <a href="${url}">${url}</a>
+              </p>
+              <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
+              <p style="color: #999; font-size: 12px;">Token: ${token}</p>
+            </div>
+          `,
+        };
+
+        await sgMail.send(msg);
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+
+</Steps>
+
+  </Tab>
+  
+  <Tab title="Nodemailer">
+
+### Using Nodemailer
+
+Nodemailer is a flexible solution that works with any SMTP service.
+
+<Steps>
+
+<Step title="Install Nodemailer">
+
+```bash
+npm install nodemailer
+npm install -D @types/nodemailer
+```
+
+</Step>
+
+<Step title="Setup Environment">
+
+```env .env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+```
+
+</Step>
+
+<Step title="Configure Better Auth">
+
+```ts lib/auth.ts
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth-invite-plugin";
+import nodemailer from "nodemailer";
+
+// Create reusable transporter
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT),
+  secure: false, // true for 465, false for other ports
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASSWORD,
+  },
+});
+
+export const auth = betterAuth({
+  database: {
+    // Your database config
+  },
+  plugins: [
+    invite({
+      async sendUserInvitation({ email, name, role, url, token, newAccount }) {
+        const mailOptions = {
+          from: `"MyApp" <${process.env.SMTP_USER}>`,
+          to: email,
+          subject: newAccount
+            ? "You're invited to join MyApp!"
+            : `Your role has been upgraded to ${role}`,
+          text: newAccount
+            ? `Hello ${name || 'there'}! You've been invited to join MyApp as a ${role}. Accept your invitation: ${url}`
+            : `Hello ${name}! Your role has been upgraded to ${role}. Activate your new role: ${url}`,
+          html: `
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px;">
+                <tr>
+                  <td align="center">
+                    <table width="600" cellpadding="0" cellspacing="0" style="background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                      <tr>
+                        <td style="background-color: #4f46e5; padding: 40px; text-align: center;">
+                          <h1 style="color: white; margin: 0; font-size: 28px;">
+                            ${newAccount ? '🎉 You\'re Invited!' : '⭐ Role Upgrade'}
+                          </h1>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 40px;">
+                          <h2 style="color: #333; margin-top: 0;">Hello ${name || 'there'}!</h2>
+                          ${newAccount
+                            ? `<p style="color: #555; line-height: 1.6;">You've been invited to join <strong>MyApp</strong> with the role of <strong>${role}</strong>.</p>`
+                            : `<p style="color: #555; line-height: 1.6;">Your role has been upgraded to <strong>${role}</strong>. You now have access to new features!</p>`
+                          }
+                          <table width="100%" cellpadding="0" cellspacing="0" style="margin: 30px 0;">
+                            <tr>
+                              <td align="center">
+                                <a href="${url}" style="display: inline-block; background-color: #4f46e5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">
+                                  ${newAccount ? 'Accept Invitation' : 'Activate New Role'}
+                                </a>
+                              </td>
+                            </tr>
+                          </table>
+                          <p style="color: #777; font-size: 14px; line-height: 1.6;">
+                            If you can't click the button above, copy and paste this link into your browser:
+                          </p>
+                          <p style="color: #4f46e5; word-break: break-all; font-size: 14px;">${url}</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0;">
+                          <p style="color: #999; font-size: 12px; margin: 0;">
+                            Invitation code: <code style="background: #e0e0e0; padding: 4px 8px; border-radius: 4px;">${token}</code>
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </body>
+            </html>
+          `,
+        };
+
+        await transporter.sendMail(mailOptions);
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+
+</Steps>
+
+  </Tab>
+</Tabs>
+
+## Advanced Email Templates
+
+<Steps>
+
+<Step title="Create Reusable Template Function">
+
+Extract your email template into a reusable function:
+
+```ts lib/email-templates.ts
+export function renderInvitationEmail({
+  name,
+  role,
+  url,
+  token,
+  newAccount,
+  inviterName,
+}: {
+  name?: string;
+  role: string;
+  url: string;
+  token: string;
+  newAccount: boolean;
+  inviterName?: string;
+}) {
+  const greeting = name ? `Hello ${name}!` : "Hello there!";
+  const title = newAccount ? "You're Invited!" : "Role Upgrade";
+  const message = newAccount
+    ? `${inviterName ? `${inviterName} has invited` : 'You\'ve been invited'} you to join our platform as a <strong>${role}</strong>.`
+    : `Your role has been upgraded to <strong>${role}</strong>!`;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title}</title>
+      </head>
+      <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+          <!-- Header -->
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 32px; font-weight: 700;">
+              ${title}
+            </h1>
+          </div>
+          
+          <!-- Content -->
+          <div style="padding: 40px;">
+            <h2 style="color: #1a1a1a; margin: 0 0 20px 0; font-size: 24px;">${greeting}</h2>
+            <p style="color: #4a4a4a; line-height: 1.8; font-size: 16px; margin: 0 0 30px 0;">
+              ${message}
+            </p>
+            
+            <!-- CTA Button -->
+            <div style="text-align: center; margin: 40px 0;">
+              <a href="${url}" 
+                 style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.25);">
+                ${newAccount ? 'Accept Invitation' : 'Activate New Role'}
+              </a>
+            </div>
+            
+            <p style="color: #6b6b6b; font-size: 14px; line-height: 1.6; margin: 30px 0 0 0;">
+              If you're having trouble clicking the button, copy and paste this URL into your browser:
+            </p>
+            <p style="color: #667eea; word-break: break-all; font-size: 14px; margin: 10px 0 0 0;">
+              ${url}
+            </p>
+          </div>
+          
+          <!-- Footer -->
+          <div style="background-color: #f7f7f7; padding: 30px; border-top: 1px solid #e0e0e0;">
+            <p style="color: #8a8a8a; font-size: 13px; margin: 0 0 10px 0; text-align: center;">
+              This invitation was sent to ${name || 'you'} and is only valid for this email address.
+            </p>
+            <p style="color: #b0b0b0; font-size: 12px; margin: 0; text-align: center;">
+              Invitation code: <code style="background: #e8e8e8; padding: 4px 8px; border-radius: 4px; font-family: 'Courier New', monospace;">${token}</code>
+            </p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+```
+
+</Step>
+
+<Step title="Use Template in Better Auth">
+
+```ts lib/auth.ts
+import { invite } from "better-auth-invite-plugin";
+import { renderInvitationEmail } from "./email-templates";
+import { resend } from "./resend";
+
+export const auth = betterAuth({
+  // ... other config
+  plugins: [
+    invite({
+      async sendUserInvitation(data) {
+        const html = renderInvitationEmail({
+          name: data.name,
+          role: data.role,
+          url: data.url,
+          token: data.token,
+          newAccount: data.newAccount,
+          inviterName: "John Doe", // You can fetch this from the session
+        });
+
+        await resend.emails.send({
+          from: "MyApp <noreply@yourdomain.com>",
+          to: data.email,
+          subject: data.newAccount
+            ? "You're invited to join MyApp!"
+            : `Your role has been upgraded to ${data.role}`,
+          html,
+        });
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+
+</Steps>
+
+## Error Handling
+
+<Note>
+**Important**: If the `sendUserInvitation` function throws an error, the invite creation will fail and return an error to the client. Always implement proper error handling.
+</Note>
+
+```ts lib/auth.ts
+import { invite } from "better-auth-invite-plugin";
+
+export const auth = betterAuth({
+  // ... other config
+  plugins: [
+    invite({
+      async sendUserInvitation(data) {
+        try {
+          await sendEmail({
+            to: data.email,
+            subject: "Invitation",
+            html: `<a href="${data.url}">Accept</a>`,
+          });
+        } catch (error) {
+          // Log the error for debugging
+          console.error("Failed to send invitation email:", error);
+          
+          // Re-throw to prevent invite creation
+          throw new Error("Failed to send invitation email");
+        }
+      },
+    }),
+  ],
+});
+```
+
+## Next Steps
+
+- Learn about [public invite codes](/examples/public-invite-codes) that don't require email
+- Build an [invite dashboard](/examples/invite-dashboard) to track sent invitations
+- Explore [role-based invites](/examples/role-based-invites) for different user types

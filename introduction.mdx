@@ -1,0 +1,152 @@
+---
+title: Introduction
+description: Learn about the Better Auth Invite Plugin and how it adds a flexible invitation system to your authentication flow
+---
+
+## Overview
+
+The Better Auth Invite Plugin adds a comprehensive invitation system to your Better Auth implementation, allowing you to control user sign-ups and manage role upgrades through secure invite codes.
+
+This plugin enables you to create, send, and manage invitations for user sign-ups or role changes, giving you fine-grained control over who can access your application and what permissions they receive.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Track invitations" icon="users">
+    Keep track of who created each invite and who accepted it, providing full audit trails for your user onboarding.
+  </Card>
+  
+  <Card title="Flexible invite codes" icon="ticket">
+    Create invitation codes to control user sign-ups with support for multiple token types (default, code, or custom).
+  </Card>
+  
+  <Card title="Email integration" icon="envelope">
+    Send invitations via email, provide shareable URLs, or generate invitation codes for manual distribution.
+  </Card>
+  
+  <Card title="Role management" icon="shield">
+    Automatically assign or upgrade roles when invites are used, perfect for team management.
+  </Card>
+  
+  <Card title="Usage limits" icon="chart-line">
+    Track each invitation's usage and enforce maximum uses to prevent abuse.
+  </Card>
+  
+  <Card title="Secure storage" icon="lock">
+    Store tokens securely in browser cookies for seamless activation during the authentication flow.
+  </Card>
+</CardGroup>
+
+## Additional capabilities
+
+- **Multiple token types**: Choose between 24-character tokens, 6-digit codes, or implement custom token generation
+- **Cookie-based activation**: Tokens are stored securely in cookies and automatically consumed during sign-up or sign-in
+- **Customizable behavior**: Full control over redirects, token expiration, and email handling
+- **Security-focused**: Built with security best practices to prevent unauthorized invite usage
+- **Welcome pages**: Show invitees a custom welcome or role upgrade page after activation
+
+## Requirements
+
+<Warning>
+  This plugin requires **Better Auth v1.4.13 or newer**. Make sure your Better Auth installation meets this requirement before proceeding.
+</Warning>
+
+You'll also need:
+
+- A Better Auth instance configured with a database adapter
+- Email sending capability (if using private invites sent via email)
+- The admin plugin (recommended for role-based access control)
+
+## When to use this plugin
+
+The invite plugin is ideal for:
+
+- **Closed beta applications**: Control who can sign up during your beta phase
+- **Team collaboration**: Invite team members and assign roles automatically
+- **Role upgrades**: Allow users to upgrade from free to paid tiers via invitation
+- **Referral systems**: Track who invited whom for referral programs
+- **Gated communities**: Ensure only invited users can create accounts
+
+## How it works
+
+The invitation system follows a simple flow:
+
+<Steps>
+  <Step title="Create an invite">
+    An authorized user creates an invitation specifying the target role and optional email address.
+  </Step>
+  
+  <Step title="Send or share">
+    The invite is either sent via email (private) or the token/URL is shared manually (public).
+  </Step>
+  
+  <Step title="Activate the invite">
+    The recipient clicks the invite link or manually activates the token, which stores it in a cookie.
+  </Step>
+  
+  <Step title="Sign up or sign in">
+    When the user signs up or signs in, a hook automatically validates and consumes the invite.
+  </Step>
+  
+  <Step title="Role assignment">
+    The user's role is set or upgraded according to the invite, and they're redirected to your welcome page.
+  </Step>
+</Steps>
+
+## Architecture overview
+
+### Database schema
+
+The plugin adds two tables to your database:
+
+**invite table**:
+- `token`: Unique invitation token
+- `createdByUserId`: ID of the user who created the invite
+- `email`: Optional email for private invites
+- `role`: Role to assign when invite is used
+- `maxUses`: Maximum number of times this invite can be used
+- `expiresAt`: Expiration timestamp
+- `status`: Current status (pending, rejected, canceled, used)
+- `shareInviterName`: Whether to show inviter's name to invitee
+- `redirectToAfterUpgrade`: Optional custom redirect URL
+- `newAccount`: Whether this is for a new account (private invites only)
+
+**inviteUse table**:
+- `inviteId`: Reference to the invite
+- `usedByUserId`: ID of the user who used the invite
+- `usedAt`: Timestamp when invite was used
+
+### Endpoints
+
+The plugin exposes the following API endpoints:
+
+- `POST /invite/create`: Create a new invitation
+- `POST /invite/activate`: Activate an invite token
+- `GET /invite/:token`: Activate invite via GET (with redirect)
+- `GET /invite/get`: Get information about an invite
+- `POST /invite/cancel`: Cancel a pending invite
+- `POST /invite/reject`: Reject an invite (for invitees)
+
+### Hooks
+
+The plugin automatically hooks into key authentication endpoints:
+
+- `/sign-up/email`
+- `/sign-in/email`
+- `/sign-in/email-otp`
+- `/verify-email`
+- `/callback/:id` (social logins)
+
+After successful authentication, these hooks check for an invite cookie, validate it, consume it, and upgrade the user's role.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the plugin and set up your database schema
+  </Card>
+  
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Get your first invite working in minutes
+  </Card>
+</CardGroup>

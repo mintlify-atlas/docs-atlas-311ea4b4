@@ -1,0 +1,559 @@
+---
+title: Email integration
+description: Configure email sending for invitation notifications
+---
+
+## Overview
+
+The invite plugin requires email configuration to send private invitations (invitations with an email address). The `sendUserInvitation` function is called automatically when creating private invites.
+
+<Warning>
+  Private invites will fail without email configuration. You must implement `sendUserInvitation` to create invitations for specific email addresses.
+</Warning>
+
+## Basic setup
+
+Configure the `sendUserInvitation` function in your plugin options:
+
+```ts auth.ts
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth/plugins";
+import { sendEmail } from "./email"; // Your email service
+
+export const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data, request) => {
+        await sendEmail({
+          to: data.email,
+          subject: `You've been invited to join as ${data.role}`,
+          html: `
+            <h1>You've been invited!</h1>
+            <p>Click <a href="${data.url}">here</a> to accept your invitation.</p>
+          `,
+        });
+      },
+    }),
+  ],
+});
+```
+
+## Function signature
+
+The `sendUserInvitation` function receives two parameters:
+
+### Data parameter
+
+<ResponseField name="email" type="string" required>
+  The recipient's email address.
+</ResponseField>
+
+<ResponseField name="name" type="string | undefined">
+  The recipient's name. Available for existing users, `undefined` for new users.
+</ResponseField>
+
+<ResponseField name="role" type="string" required>
+  The role the user will receive when accepting the invitation.
+</ResponseField>
+
+<ResponseField name="url" type="string" required>
+  The complete activation URL. This includes the base URL, token, and callback URL.
+
+  Example: `https://yourapp.com/api/auth/invite/abc123?callbackURL=https%3A%2F%2Fyourapp.com%2Fdashboard`
+</ResponseField>
+
+<ResponseField name="token" type="string" required>
+  The raw invitation token. Useful if you want to construct your own URL or display the token.
+</ResponseField>
+
+<ResponseField name="newAccount" type="boolean" required>
+  - `true`: The recipient needs to create a new account
+  - `false`: The recipient has an existing account and their role will be upgraded
+</ResponseField>
+
+### Request parameter
+
+<ResponseField name="request" type="Request">
+  The original HTTP request object. Use this to access headers, determine the origin, or extract other request context.
+</ResponseField>
+
+## Email templates
+
+Here are example templates for different scenarios:
+
+### New user invitation
+
+```ts
+sendUserInvitation: async (data) => {
+  if (data.newAccount) {
+    await sendEmail({
+      to: data.email,
+      subject: "You've been invited to join our platform",
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .button { 
+                display: inline-block; 
+                padding: 12px 24px; 
+                background: #007bff; 
+                color: white; 
+                text-decoration: none; 
+                border-radius: 4px; 
+              }
+              .footer { margin-top: 30px; color: #666; font-size: 12px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>Welcome!</h1>
+              <p>You've been invited to join our platform as a <strong>${data.role}</strong>.</p>
+              <p>
+                <a href="${data.url}" class="button">Accept Invitation</a>
+              </p>
+              <p>Or copy and paste this link into your browser:</p>
+              <p><code>${data.url}</code></p>
+              <div class="footer">
+                <p>This invitation will expire in 7 days.</p>
+                <p>If you didn't expect this invitation, you can safely ignore this email.</p>
+              </div>
+            </div>
+          </body>
+        </html>
+      `,
+    });
+  }
+}
+```
+
+### Role upgrade invitation
+
+```ts
+sendUserInvitation: async (data) => {
+  if (!data.newAccount) {
+    await sendEmail({
+      to: data.email,
+      subject: `Your role has been upgraded to ${data.role}`,
+      html: `
+        <h1>Role Upgrade</h1>
+        <p>Hi ${data.name || 'there'},</p>
+        <p>Your account has been upgraded to <strong>${data.role}</strong>!</p>
+        <p>
+          <a href="${data.url}">Click here to activate your new role</a>
+        </p>
+        <p>You'll need to sign in to confirm this change.</p>
+      `,
+    });
+  }
+}
+```
+
+### Combined template
+
+```ts
+sendUserInvitation: async (data) => {
+  const subject = data.newAccount
+    ? "You've been invited to join"
+    : `Your role has been upgraded to ${data.role}`;
+
+  const greeting = data.name ? `Hi ${data.name},` : "Hello,";
+
+  const action = data.newAccount
+    ? "Create your account and get started"
+    : "Sign in to activate your new role";
+
+  await sendEmail({
+    to: data.email,
+    subject,
+    html: `
+      <h1>${subject}</h1>
+      <p>${greeting}</p>
+      <p>${action}:</p>
+      <p><a href="${data.url}">${action}</a></p>
+      <p>Role: <strong>${data.role}</strong></p>
+    `,
+  });
+}
+```
+
+## Email service providers
+
+Integrate with popular email services:
+
+<Tabs>
+  <Tab title="Resend">
+    ```ts
+    import { Resend } from "resend";
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
+    export const auth = betterAuth({
+      plugins: [
+        invite({
+          sendUserInvitation: async (data) => {
+            await resend.emails.send({
+              from: "noreply@yourapp.com",
+              to: data.email,
+              subject: `Invitation to join as ${data.role}`,
+              html: `
+                <p>Click <a href="${data.url}">here</a> to accept.</p>
+              `,
+            });
+          },
+        }),
+      ],
+    });
+    ```
+  </Tab>
+  <Tab title="Nodemailer">
+    ```ts
+    import nodemailer from "nodemailer";
+
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT),
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    export const auth = betterAuth({
+      plugins: [
+        invite({
+          sendUserInvitation: async (data) => {
+            await transporter.sendMail({
+              from: '"Your App" <noreply@yourapp.com>',
+              to: data.email,
+              subject: `Invitation to join as ${data.role}`,
+              html: `<a href="${data.url}">Accept invitation</a>`,
+            });
+          },
+        }),
+      ],
+    });
+    ```
+  </Tab>
+  <Tab title="SendGrid">
+    ```ts
+    import sgMail from "@sendgrid/mail";
+
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+
+    export const auth = betterAuth({
+      plugins: [
+        invite({
+          sendUserInvitation: async (data) => {
+            await sgMail.send({
+              from: "noreply@yourapp.com",
+              to: data.email,
+              subject: `Invitation to join as ${data.role}`,
+              html: `<a href="${data.url}">Accept invitation</a>`,
+            });
+          },
+        }),
+      ],
+    });
+    ```
+  </Tab>
+  <Tab title="Postmark">
+    ```ts
+    import postmark from "postmark";
+
+    const client = new postmark.ServerClient(process.env.POSTMARK_API_KEY!);
+
+    export const auth = betterAuth({
+      plugins: [
+        invite({
+          sendUserInvitation: async (data) => {
+            await client.sendEmail({
+              From: "noreply@yourapp.com",
+              To: data.email,
+              Subject: `Invitation to join as ${data.role}`,
+              HtmlBody: `<a href="${data.url}">Accept invitation</a>`,
+            });
+          },
+        }),
+      ],
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## URL generation
+
+The `data.url` parameter contains a fully formed activation URL:
+
+### Default URL format
+
+```
+https://yourapp.com/api/auth/invite/{token}?callbackURL={callbackURL}
+```
+
+This URL is constructed in `src/utils.ts` by the `createRedirectURL` function:
+
+```ts
+export const createRedirectURL = ({
+  ctx,
+  invitation,
+  callbackURL,
+  customInviteUrl,
+}: {
+  ctx: GenericEndpointContext;
+  invitation: InviteTypeWithId;
+  callbackURL: string;
+  customInviteUrl?: string;
+}) => {
+  if (!customInviteUrl) {
+    return `${ctx.context.baseURL}/invite/${invitation.token}?callbackURL=${encodeURIComponent(callbackURL)}`;
+  }
+
+  return customInviteUrl
+    .replace("{token}", invitation.token)
+    .replace("{callbackURL}", encodeURIComponent(callbackURL));
+};
+```
+
+### Custom URL format
+
+Override the URL format using `customInviteUrl`:
+
+```ts
+invite({
+  defaultCustomInviteUrl: "https://myapp.com/join?code={token}&next={callbackURL}",
+  sendUserInvitation: async (data) => {
+    // data.url will use your custom format:
+    // https://myapp.com/join?code=abc123&next=...
+    await sendEmail({ to: data.email, html: `<a href="${data.url}">Join</a>` });
+  },
+})
+```
+
+### Per-invitation URLs
+
+You can also override the URL per invitation:
+
+```ts
+await authClient.invite.create({
+  email: "user@example.com",
+  role: "member",
+  customInviteUrl: "https://special.myapp.com/invite/{token}",
+});
+```
+
+## Testing emails
+
+Use a local email testing tool during development:
+
+### MailHog
+
+```bash
+# Start MailHog
+docker run -d -p 1025:1025 -p 8025:8025 mailhog/mailhog
+
+# Configure Nodemailer
+const transporter = nodemailer.createTransport({
+  host: "localhost",
+  port: 1025,
+  ignoreTLS: true,
+});
+
+# View emails at http://localhost:8025
+```
+
+### Ethereal Email
+
+```ts
+import nodemailer from "nodemailer";
+
+// Generate test credentials
+const testAccount = await nodemailer.createTestAccount();
+
+const transporter = nodemailer.createTransport({
+  host: "smtp.ethereal.email",
+  port: 587,
+  auth: {
+    user: testAccount.user,
+    pass: testAccount.pass,
+  },
+});
+
+export const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        const info = await transporter.sendMail({
+          from: '"Test" <test@example.com>',
+          to: data.email,
+          subject: "Test invite",
+          html: `<a href="${data.url}">Accept</a>`,
+        });
+
+        // Preview URL: https://ethereal.email/message/...
+        console.log("Preview:", nodemailer.getTestMessageUrl(info));
+      },
+    }),
+  ],
+});
+```
+
+## Error handling
+
+Handle email sending failures gracefully:
+
+```ts
+invite({
+  sendUserInvitation: async (data, request) => {
+    try {
+      await sendEmail({
+        to: data.email,
+        subject: "Invitation",
+        html: `<a href="${data.url}">Accept</a>`,
+      });
+    } catch (error) {
+      // Log the error for debugging
+      console.error("Failed to send invitation email:", error);
+      
+      // The plugin will catch this and return an error to the client
+      throw new Error("Failed to send invitation email");
+    }
+  },
+})
+```
+
+The plugin catches errors from `sendUserInvitation` and returns:
+
+```json
+{
+  "message": "Error sending the invitation email",
+  "errorCode": "ERROR_SENDING_THE_INVITATION_EMAIL"
+}
+```
+
+## Logging and monitoring
+
+Log email activity for debugging and monitoring:
+
+```ts
+invite({
+  sendUserInvitation: async (data, request) => {
+    console.log("Sending invitation:", {
+      to: data.email,
+      role: data.role,
+      newAccount: data.newAccount,
+      token: data.token.substring(0, 8) + "...", // Log partial token
+    });
+
+    await sendEmail({ ... });
+
+    console.log("Invitation sent successfully to", data.email);
+  },
+})
+```
+
+## Deprecated: sendUserRoleUpgrade
+
+<Warning>
+  The `sendUserRoleUpgrade` option is deprecated. Use `sendUserInvitation` instead, which receives a `newAccount` parameter to distinguish between new users and role upgrades.
+</Warning>
+
+If you're upgrading from an older version:
+
+```ts
+// Old (deprecated)
+invite({
+  sendUserRoleUpgrade: async (data) => {
+    // Only called for existing users
+  },
+})
+
+// New (recommended)
+invite({
+  sendUserInvitation: async (data) => {
+    if (data.newAccount) {
+      // New user - send welcome email
+    } else {
+      // Existing user - send role upgrade email
+    }
+  },
+})
+```
+
+## Complete example
+
+```ts auth.ts
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth/plugins";
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+export const auth = betterAuth({
+  plugins: [
+    invite({
+      // Email configuration
+      sendUserInvitation: async (data, request) => {
+        const origin = new URL(request.url).origin;
+
+        const subject = data.newAccount
+          ? `You've been invited to join ${origin}`
+          : `Your role has been upgraded to ${data.role}`;
+
+        const greeting = data.name ? `Hi ${data.name},` : "Hello,";
+
+        try {
+          await resend.emails.send({
+            from: "noreply@yourapp.com",
+            to: data.email,
+            subject,
+            html: `
+              <!DOCTYPE html>
+              <html>
+                <body style="font-family: Arial, sans-serif;">
+                  <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h1>${subject}</h1>
+                    <p>${greeting}</p>
+                    ${data.newAccount
+                      ? `<p>You've been invited to join as a <strong>${data.role}</strong>.</p>`
+                      : `<p>Your account has been upgraded to <strong>${data.role}</strong>.</p>`
+                    }
+                    <p>
+                      <a href="${data.url}" style="display: inline-block; padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 4px;">
+                        ${data.newAccount ? "Accept Invitation" : "Activate New Role"}
+                      </a>
+                    </p>
+                    <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                      This invitation expires in 7 days.
+                    </p>
+                  </div>
+                </body>
+              </html>
+            `,
+          });
+        } catch (error) {
+          console.error("Failed to send invitation email:", error);
+          throw error;
+        }
+      },
+
+      // Other options
+      invitationTokenExpiresIn: 7 * 24 * 60 * 60, // 7 days
+    }),
+  ],
+});
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Creating invites" icon="envelope" href="/guides/creating-invites">
+    Learn how to create invitations
+  </Card>
+  <Card title="Hooks and callbacks" icon="webhook" href="/guides/hooks-and-callbacks">
+    Respond to invitation lifecycle events
+  </Card>
+</CardGroup>

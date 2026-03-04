@@ -1,0 +1,652 @@
+---
+title: Invite Dashboard
+description: Build a complete UI to manage, list, cancel, and track invitations
+---
+
+This example demonstrates how to build a comprehensive dashboard for managing invitations, including listing, canceling, and tracking invite status.
+
+## Overview
+
+An invite dashboard allows you to:
+- View all invitations created by a user
+- Track invitation status (pending, used, canceled, rejected)
+- Cancel pending invitations
+- Monitor invitation usage and expiration
+- Display invite analytics
+
+## Server Setup
+
+<Steps>
+
+<Step title="Create API Route for Listing Invites">
+
+Create an endpoint to fetch user's invitations:
+
+```ts app/api/invites/route.ts
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { NextResponse } from "next/server";
+
+export async function GET() {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Query invitations from database
+  // This assumes you have access to the database adapter
+  const invitations = await db.query.invitation.findMany({
+    where: eq(invitation.createdByUserId, session.user.id),
+    orderBy: desc(invitation.createdAt),
+  });
+
+  return NextResponse.json({ invitations });
+}
+```
+
+</Step>
+
+<Step title="Configure Database Access">
+
+Ensure you have access to the invitation table:
+
+```ts lib/db.ts
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import Database from "better-sqlite3";
+
+const sqlite = new Database("./sqlite.db");
+export const db = drizzle(sqlite);
+
+// Export invitation schema
+export const invitation = {
+  id: text("id").primaryKey(),
+  token: text("token").notNull(),
+  createdByUserId: text("createdByUserId").notNull(),
+  email: text("email"),
+  role: text("role").notNull(),
+  status: text("status").notNull().default("pending"),
+  maxUses: integer("maxUses").notNull().default(1),
+  createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
+  expiresAt: integer("expiresAt", { mode: "timestamp" }).notNull(),
+  shareInviterName: integer("shareInviterName", { mode: "boolean" }).notNull().default(true),
+  redirectToAfterUpgrade: text("redirectToAfterUpgrade"),
+  newAccount: integer("newAccount", { mode: "boolean" }),
+};
+```
+
+</Step>
+
+</Steps>
+
+## Dashboard Components
+
+<Steps>
+
+<Step title="Main Dashboard Component">
+
+Create the main dashboard that displays all invitations:
+
+```tsx components/invite-dashboard.tsx
+"use client";
+
+import { useState, useEffect } from "react";
+import { authClient } from "@/lib/auth-client";
+import { InviteCard } from "./invite-card";
+import { InviteStats } from "./invite-stats";
+import { CreateInviteModal } from "./create-invite-modal";
+
+interface Invitation {
+  id: string;
+  token: string;
+  email?: string;
+  role: string;
+  status: "pending" | "used" | "canceled" | "rejected";
+  maxUses: number;
+  createdAt: Date;
+  expiresAt: Date;
+  newAccount?: boolean;
+}
+
+export function InviteDashboard() {
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [filter, setFilter] = useState<"all" | "pending" | "used" | "canceled" | "rejected">("all");
+
+  useEffect(() => {
+    fetchInvitations();
+  }, []);
+
+  const fetchInvitations = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/invites");
+      const data = await response.json();
+      setInvitations(data.invitations || []);
+    } catch (error) {
+      console.error("Failed to fetch invitations:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancel = async (token: string) => {
+    try {
+      const { error } = await authClient.invite.cancel({ token });
+      
+      if (error) {
+        alert(`Error: ${error.message}`);
+        return;
+      }
+
+      // Refresh the list
+      await fetchInvitations();
+    } catch (error) {
+      alert("Failed to cancel invitation");
+    }
+  };
+
+  const filteredInvitations = filter === "all" 
+    ? invitations 
+    : invitations.filter(inv => inv.status === filter);
+
+  const stats = {
+    total: invitations.length,
+    pending: invitations.filter(i => i.status === "pending").length,
+    used: invitations.filter(i => i.status === "used").length,
+    canceled: invitations.filter(i => i.status === "canceled").length,
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold text-gray-900">Invitation Dashboard</h1>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          Create Invite
+        </button>
+      </div>
+
+      <InviteStats stats={stats} />
+
+      <div className="bg-white rounded-lg shadow mb-6">
+        <div className="border-b border-gray-200">
+          <nav className="flex space-x-8 px-6" aria-label="Tabs">
+            {["all", "pending", "used", "canceled", "rejected"].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab as typeof filter)}
+                className={`py-4 px-1 border-b-2 font-medium text-sm capitalize ${
+                  filter === tab
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+              >
+                {tab} ({tab === "all" ? stats.total : invitations.filter(i => i.status === tab).length})
+              </button>
+            ))}
+          </nav>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {filteredInvitations.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-12 text-center">
+            <p className="text-gray-500 text-lg">No {filter !== "all" && filter} invitations found</p>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="mt-4 text-blue-600 hover:text-blue-700 font-medium"
+            >
+              Create your first invitation
+            </button>
+          </div>
+        ) : (
+          filteredInvitations.map((invitation) => (
+            <InviteCard
+              key={invitation.id}
+              invitation={invitation}
+              onCancel={handleCancel}
+            />
+          ))
+        )}
+      </div>
+
+      {showCreateModal && (
+        <CreateInviteModal
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={() => {
+            setShowCreateModal(false);
+            fetchInvitations();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+```
+
+</Step>
+
+<Step title="Invite Card Component">
+
+Create individual cards for each invitation:
+
+```tsx components/invite-card.tsx
+"use client";
+
+import { useState } from "react";
+import { Mail, Link as LinkIcon, Calendar, Users, Copy, X, Check } from "lucide-react";
+
+interface InviteCardProps {
+  invitation: {
+    id: string;
+    token: string;
+    email?: string;
+    role: string;
+    status: "pending" | "used" | "canceled" | "rejected";
+    maxUses: number;
+    createdAt: Date;
+    expiresAt: Date;
+    newAccount?: boolean;
+  };
+  onCancel: (token: string) => Promise<void>;
+}
+
+export function InviteCard({ invitation, onCancel }: InviteCardProps) {
+  const [copied, setCopied] = useState(false);
+  const [canceling, setCanceling] = useState(false);
+
+  const isPrivate = !!invitation.email;
+  const isExpired = new Date(invitation.expiresAt) < new Date();
+  const isPending = invitation.status === "pending";
+  const canCancel = isPending && !isExpired;
+
+  const inviteUrl = `${window.location.origin}/invite/${invitation.token}`;
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(inviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCancel = async () => {
+    if (!confirm("Are you sure you want to cancel this invitation?")) return;
+    
+    setCanceling(true);
+    await onCancel(invitation.token);
+    setCanceling(false);
+  };
+
+  const statusColors = {
+    pending: "bg-yellow-100 text-yellow-800",
+    used: "bg-green-100 text-green-800",
+    canceled: "bg-gray-100 text-gray-800",
+    rejected: "bg-red-100 text-red-800",
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center space-x-3">
+          {isPrivate ? (
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <Mail className="w-5 h-5 text-blue-600" />
+            </div>
+          ) : (
+            <div className="p-2 bg-purple-100 rounded-lg">
+              <LinkIcon className="w-5 h-5 text-purple-600" />
+            </div>
+          )}
+          <div>
+            <h3 className="font-semibold text-gray-900">
+              {isPrivate ? invitation.email : "Public Invite"}
+            </h3>
+            <p className="text-sm text-gray-500">
+              Role: <span className="font-medium text-gray-700">{invitation.role}</span>
+              {invitation.newAccount !== undefined && (
+                <span className="ml-2">
+                  ({invitation.newAccount ? "New Account" : "Role Upgrade"})
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColors[invitation.status]}`}>
+          {invitation.status}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+        <div className="flex items-center text-gray-600">
+          <Calendar className="w-4 h-4 mr-2" />
+          <span>
+            Created {new Date(invitation.createdAt).toLocaleDateString()}
+          </span>
+        </div>
+        <div className="flex items-center text-gray-600">
+          <Users className="w-4 h-4 mr-2" />
+          <span>Max uses: {invitation.maxUses}</span>
+        </div>
+      </div>
+
+      {isExpired && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+          <p className="text-sm text-red-800">
+            Expired on {new Date(invitation.expiresAt).toLocaleDateString()}
+          </p>
+        </div>
+      )}
+
+      <div className="flex items-center space-x-2">
+        {!isPrivate && isPending && (
+          <>
+            <input
+              type="text"
+              value={inviteUrl}
+              readOnly
+              className="flex-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-md text-sm"
+            />
+            <button
+              onClick={handleCopy}
+              className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              title="Copy link"
+            >
+              {copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+            </button>
+          </>
+        )}
+        {canCancel && (
+          <button
+            onClick={handleCancel}
+            disabled={canceling}
+            className="p-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
+            title="Cancel invitation"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+</Step>
+
+<Step title="Stats Component">
+
+Display invitation statistics:
+
+```tsx components/invite-stats.tsx
+import { TrendingUp, Clock, CheckCircle, XCircle } from "lucide-react";
+
+interface InviteStatsProps {
+  stats: {
+    total: number;
+    pending: number;
+    used: number;
+    canceled: number;
+  };
+}
+
+export function InviteStats({ stats }: InviteStatsProps) {
+  const statCards = [
+    {
+      label: "Total Invites",
+      value: stats.total,
+      icon: TrendingUp,
+      color: "blue",
+    },
+    {
+      label: "Pending",
+      value: stats.pending,
+      icon: Clock,
+      color: "yellow",
+    },
+    {
+      label: "Used",
+      value: stats.used,
+      icon: CheckCircle,
+      color: "green",
+    },
+    {
+      label: "Canceled",
+      value: stats.canceled,
+      icon: XCircle,
+      color: "gray",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      {statCards.map((stat) => {
+        const Icon = stat.icon;
+        return (
+          <div
+            key={stat.label}
+            className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">{stat.label}</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">{stat.value}</p>
+              </div>
+              <div className={`p-3 bg-${stat.color}-100 rounded-lg`}>
+                <Icon className={`w-6 h-6 text-${stat.color}-600`} />
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+</Step>
+
+<Step title="Create Invite Modal">
+
+Add a modal for creating new invitations:
+
+```tsx components/create-invite-modal.tsx
+"use client";
+
+import { useState } from "react";
+import { authClient } from "@/lib/auth-client";
+import { X } from "lucide-react";
+
+interface CreateInviteModalProps {
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export function CreateInviteModal({ onClose, onSuccess }: CreateInviteModalProps) {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("user");
+  const [maxUses, setMaxUses] = useState(1);
+  const [inviteType, setInviteType] = useState<"private" | "public">("private");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const { error } = await authClient.invite.create({
+        email: inviteType === "private" ? email : undefined,
+        role,
+        maxUses,
+        senderResponse: inviteType === "public" ? "url" : undefined,
+      });
+
+      if (error) {
+        alert(`Error: ${error.message}`);
+      } else {
+        onSuccess();
+      }
+    } catch (err) {
+      alert("Failed to create invitation");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+        <div className="flex items-center justify-between p-6 border-b">
+          <h2 className="text-xl font-bold">Create Invitation</h2>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Invite Type</label>
+            <div className="flex gap-4">
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  value="private"
+                  checked={inviteType === "private"}
+                  onChange={(e) => setInviteType("private")}
+                  className="mr-2"
+                />
+                Private (Email)
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  value="public"
+                  checked={inviteType === "public"}
+                  onChange={(e) => setInviteType("public")}
+                  className="mr-2"
+                />
+                Public (Link)
+              </label>
+            </div>
+          </div>
+
+          {inviteType === "private" && (
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium mb-1">
+                Email Address
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="role" className="block text-sm font-medium mb-1">
+              Role
+            </label>
+            <select
+              id="role"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+            >
+              <option value="user">User</option>
+              <option value="moderator">Moderator</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+
+          {inviteType === "public" && (
+            <div>
+              <label htmlFor="maxUses" className="block text-sm font-medium mb-1">
+                Max Uses (0 = unlimited)
+              </label>
+              <input
+                id="maxUses"
+                type="number"
+                value={maxUses}
+                onChange={(e) => setMaxUses(Number(e.target.value))}
+                min="0"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? "Creating..." : "Create Invite"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+```
+
+</Step>
+
+</Steps>
+
+## Usage Example
+
+```tsx app/dashboard/invites/page.tsx
+import { InviteDashboard } from "@/components/invite-dashboard";
+
+export default function InvitesPage() {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <InviteDashboard />
+    </div>
+  );
+}
+```
+
+## Advanced Features
+
+<Note>
+**Tracking Usage**: To track how many times an invite has been used, you'll need to query the `inviteUse` table which stores each usage record with `inviteId`, `usedByUserId`, and `usedAt`.
+</Note>
+
+<Note>
+**Real-time Updates**: Consider using webhooks or polling to update the dashboard when invitations are used or expired.
+</Note>
+
+## Next Steps
+
+- Add pagination for large invitation lists
+- Implement search and filtering by role or date
+- Add analytics charts for invitation trends
+- Create email notifications for invitation events

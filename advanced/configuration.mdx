@@ -1,0 +1,543 @@
+---
+title: Configuration Reference
+description: Complete configuration options for the invite plugin
+---
+
+This page provides a comprehensive reference for all configuration options available in the invite plugin.
+
+## Core Options
+
+### getDate
+
+A function to generate the current date for invite operations.
+
+<ParamField path="getDate" type="() => Date" default="() => new Date()">
+  Custom date generator function.
+</ParamField>
+
+```ts
+invite({
+  getDate: () => new Date()
+})
+```
+
+### invitationTokenExpiresIn
+
+Number of seconds the invitation token remains valid.
+
+<ParamField path="invitationTokenExpiresIn" type="number" default="3600">
+  Token expiration time in seconds (default: 1 hour).
+</ParamField>
+
+```ts
+invite({
+  invitationTokenExpiresIn: 60 * 60 * 24 // 24 hours
+})
+```
+
+### inviteCookieMaxAge
+
+Maximum age for the invitation cookie in seconds. This controls how long users have to complete the login flow before activating the token if they are not logged in.
+
+<ParamField path="inviteCookieMaxAge" type="number" default="600">
+  Cookie max age in seconds (default: 10 minutes).
+</ParamField>
+
+```ts
+invite({
+  inviteCookieMaxAge: 600 // 10 minutes
+})
+```
+
+## Permission Checks
+
+### canCreateInvite
+
+A function or boolean that determines if a user can create an invite. Can also accept a Permissions object for integration with the admin plugin.
+
+<ParamField path="canCreateInvite" type="function | boolean | Permissions" default="true">
+  Permission check for creating invites.
+</ParamField>
+
+```ts
+invite({
+  canCreateInvite: async ({ invitedUser, inviterUser, ctx }) => {
+    const canCreate = await hasPermission(ctx, 'create-invite');
+    return canCreate;
+  }
+})
+```
+
+**Function parameters:**
+- `invitedUser`: Object with `email?` and `role` properties
+- `inviterUser`: The user creating the invite (UserWithRole)
+- `ctx`: Generic endpoint context
+
+### canAcceptInvite
+
+A function or boolean that runs before a user accepts an invite.
+
+<ParamField path="canAcceptInvite" type="function | boolean | Permissions" default="true">
+  Permission check for accepting invites.
+</ParamField>
+
+```ts
+invite({
+  canAcceptInvite: async ({ invitedUser, newAccount }) => {
+    const canAccept = await hasPermission(ctx, 'accept-invite');
+    return canAccept;
+  }
+})
+```
+
+**Function parameters:**
+- `invitedUser`: The user accepting the invite (UserWithRole)
+- `newAccount`: Boolean indicating if this is a new account
+
+### canCancelInvite
+
+A function or boolean that runs before a user cancels an invite. Note: regardless of this option, only the user who created the invite can cancel it.
+
+<ParamField path="canCancelInvite" type="function | boolean | Permissions" default="true">
+  Permission check for canceling invites.
+</ParamField>
+
+```ts
+invite({
+  canCancelInvite: async ({ inviterUser, invitation, ctx }) => {
+    return inviterUser.role === 'admin';
+  }
+})
+```
+
+**Function parameters:**
+- `inviterUser`: The user who created the invite (UserWithRole)
+- `invitation`: The invitation being canceled (InviteTypeWithId)
+- `ctx`: Generic endpoint context
+
+### canRejectInvite
+
+A function or boolean that runs before a user rejects an invite. Note: regardless of this option, only the invitee (user whose email matches the invite email for private invites) can reject it.
+
+<ParamField path="canRejectInvite" type="function | boolean | Permissions" default="true">
+  Permission check for rejecting invites.
+</ParamField>
+
+```ts
+invite({
+  canRejectInvite: async ({ inviteeUser, invitation, ctx }) => {
+    return true;
+  }
+})
+```
+
+**Function parameters:**
+- `inviteeUser`: The user rejecting the invite (UserWithRole)
+- `invitation`: The invitation being rejected (InviteTypeWithId)
+- `ctx`: Generic endpoint context
+
+## Token Configuration
+
+### defaultTokenType
+
+The default token type for invitations.
+
+<ParamField path="defaultTokenType" type="'token' | 'code' | 'custom'" default="'token'">
+  - `token`: Generates a 24-character ID using `generateId(24)`
+  - `code`: Generates a 6-character alphanumeric code using `generateRandomString(6, "0-9", "A-Z")`
+  - `custom`: Uses the `generateToken` option (required)
+</ParamField>
+
+```ts
+invite({
+  defaultTokenType: 'code' // ABC123
+})
+```
+
+### generateToken
+
+A custom function to generate invitation tokens. Required when using `defaultTokenType: 'custom'`.
+
+<ParamField path="generateToken" type="() => string">
+  Custom token generator function.
+</ParamField>
+
+```ts
+invite({
+  defaultTokenType: 'custom',
+  generateToken: () => {
+    return crypto.randomUUID();
+  }
+})
+```
+
+<Note>
+See [Custom Tokens](/advanced/custom-tokens) for detailed examples.
+</Note>
+
+## Redirect URLs
+
+### defaultRedirectToSignUp
+
+The default URL to redirect users to sign up.
+
+<ParamField path="defaultRedirectToSignUp" type="string" default="'/auth/sign-up'">
+  Sign-up redirect URL.
+</ParamField>
+
+```ts
+invite({
+  defaultRedirectToSignUp: '/register'
+})
+```
+
+### defaultRedirectToSignIn
+
+The default URL to redirect users to sign in.
+
+<ParamField path="defaultRedirectToSignIn" type="string" default="'/auth/sign-in'">
+  Sign-in redirect URL.
+</ParamField>
+
+```ts
+invite({
+  defaultRedirectToSignIn: '/login'
+})
+```
+
+### defaultRedirectAfterUpgrade
+
+The default redirect URL after upgrading a role or logging in with an invite. Use `{token}` as a placeholder for the actual token.
+
+<ParamField path="defaultRedirectAfterUpgrade" type="string">
+  Post-upgrade redirect URL with token placeholder.
+</ParamField>
+
+```ts
+invite({
+  defaultRedirectAfterUpgrade: '/dashboard?invite={token}'
+})
+```
+
+### defaultCustomInviteUrl
+
+Custom URL format for invite links. Use `{token}` and `{callbackUrl}` as placeholders.
+
+<ParamField path="defaultCustomInviteUrl" type="string">
+  Custom invite URL template.
+</ParamField>
+
+```ts
+invite({
+  defaultCustomInviteUrl: '/join/{token}?callback={callbackUrl}'
+})
+```
+
+## Default Behavior
+
+### defaultShareInviterName
+
+Whether the inviter's name should be shared with the invitee by default. When enabled, the person receiving the invitation will see the name of the user who created the invitation.
+
+<ParamField path="defaultShareInviterName" type="boolean" default="true">
+  Share inviter name with invitee.
+</ParamField>
+
+```ts
+invite({
+  defaultShareInviterName: false
+})
+```
+
+### defaultMaxUses
+
+Maximum times an invite can be used.
+
+<ParamField path="defaultMaxUses" type="number" default="1 for private invites, infinite for public invites">
+  Maximum number of uses per invite.
+</ParamField>
+
+```ts
+invite({
+  defaultMaxUses: 10
+})
+```
+
+### defaultSenderResponse
+
+How the sender should receive the token (only applies when no email is provided).
+
+<ParamField path="defaultSenderResponse" type="'token' | 'url'" default="'token'">
+  Response format for invite creator.
+</ParamField>
+
+```ts
+invite({
+  defaultSenderResponse: 'url'
+})
+```
+
+### defaultSenderResponseRedirect
+
+Where to redirect the user by default (only if no email is provided).
+
+<ParamField path="defaultSenderResponseRedirect" type="'signUp' | 'signIn'" default="'signUp'">
+  Default redirect destination.
+</ParamField>
+
+```ts
+invite({
+  defaultSenderResponseRedirect: 'signIn'
+})
+```
+
+## Cleanup Options
+
+### cleanupInvitesOnDecision
+
+Delete invitations when a decision is made (rejected, canceled).
+
+<ParamField path="cleanupInvitesOnDecision" type="boolean" default="false">
+  Auto-delete invites on rejection or cancellation.
+</ParamField>
+
+```ts
+invite({
+  cleanupInvitesOnDecision: true
+})
+```
+
+### cleanupInvitesAfterMaxUses
+
+Delete invitations after they reach maximum uses.
+
+<ParamField path="cleanupInvitesAfterMaxUses" type="boolean" default="false">
+  Auto-delete invites after max uses reached.
+</ParamField>
+
+```ts
+invite({
+  cleanupInvitesAfterMaxUses: true
+})
+```
+
+## Email Notifications
+
+### sendUserInvitation
+
+Send an email to the user with the invite link.
+
+<ParamField path="sendUserInvitation" type="function">
+  Email notification handler for invitations.
+</ParamField>
+
+```ts
+invite({
+  sendUserInvitation: async (data, request) => {
+    const { email, name, role, url, token, newAccount } = data;
+    
+    await sendEmail({
+      to: email,
+      subject: `You've been invited to join as ${role}`,
+      html: `
+        <p>Hi ${name || 'there'},</p>
+        <p>You've been invited to join with the role: ${role}</p>
+        <p>${newAccount ? 'Create your account' : 'Log in'} here: ${url}</p>
+      `
+    });
+  }
+})
+```
+
+**Function parameters:**
+- `data.email`: Recipient email address
+- `data.name`: Recipient name (optional)
+- `data.role`: Role being assigned
+- `data.url`: Full invite URL
+- `data.token`: Invite token
+- `data.newAccount`: Boolean indicating if this is a new account
+- `request`: Request object (optional)
+
+## Callbacks
+
+### onInvitationUsed
+
+A callback function that is triggered when an invite is used.
+
+<ParamField path="onInvitationUsed" type="function">
+  Callback executed after invite acceptance.
+</ParamField>
+
+```ts
+invite({
+  onInvitationUsed: async (data, request) => {
+    const { invitedUser, newUser, newAccount } = data;
+    
+    console.log(`User ${newUser.email} accepted invite`);
+    console.log(`Role upgraded to: ${newUser.role}`);
+    console.log(`New account: ${newAccount}`);
+  }
+})
+```
+
+**Function parameters:**
+- `data.invitedUser`: Original user before role update (UserWithRole)
+- `data.newUser`: User after role update (UserWithRole)
+- `data.newAccount`: Boolean indicating if this is a new account
+- `request`: Request object (optional)
+
+## Hooks
+
+### inviteHooks
+
+Hooks for various invite lifecycle events.
+
+<ParamField path="inviteHooks" type="object">
+  Lifecycle hooks for invite operations.
+</ParamField>
+
+#### beforeCreateInvite
+
+Runs before a user creates an invite.
+
+```ts
+invite({
+  inviteHooks: {
+    beforeCreateInvite: async ({ ctx }) => {
+      console.log('Creating invite...');
+    }
+  }
+})
+```
+
+#### afterCreateInvite
+
+Runs after a user creates an invite.
+
+```ts
+invite({
+  inviteHooks: {
+    afterCreateInvite: async ({ ctx, invitation }) => {
+      console.log(`Invite created: ${invitation.token}`);
+    }
+  }
+})
+```
+
+#### beforeAcceptInvite
+
+Runs before a user accepts an invite. You can return a user object to override the invited user.
+
+```ts
+invite({
+  inviteHooks: {
+    beforeAcceptInvite: async ({ ctx, invitedUser }) => {
+      return {
+        user: {
+          ...invitedUser,
+          name: 'Custom Name'
+        }
+      };
+    }
+  }
+})
+```
+
+#### afterAcceptInvite
+
+Runs after a user accepts an invite.
+
+```ts
+invite({
+  inviteHooks: {
+    afterAcceptInvite: async ({ ctx, invitation, invitedUser }) => {
+      console.log(`User ${invitedUser.email} accepted invite`);
+    }
+  }
+})
+```
+
+#### beforeCancelInvite
+
+Runs before a user cancels an invite.
+
+```ts
+invite({
+  inviteHooks: {
+    beforeCancelInvite: async ({ ctx, invitation }) => {
+      console.log(`Canceling invite: ${invitation.token}`);
+    }
+  }
+})
+```
+
+#### afterCancelInvite
+
+Runs after a user cancels an invite.
+
+```ts
+invite({
+  inviteHooks: {
+    afterCancelInvite: async ({ ctx, invitation }) => {
+      console.log(`Invite canceled: ${invitation.token}`);
+    }
+  }
+})
+```
+
+#### beforeRejectInvite
+
+Runs before a user rejects an invite.
+
+```ts
+invite({
+  inviteHooks: {
+    beforeRejectInvite: async ({ ctx, invitation }) => {
+      console.log(`Rejecting invite: ${invitation.token}`);
+    }
+  }
+})
+```
+
+#### afterRejectInvite
+
+Runs after a user rejects an invite.
+
+```ts
+invite({
+  inviteHooks: {
+    afterRejectInvite: async ({ ctx, invitation }) => {
+      console.log(`Invite rejected: ${invitation.token}`);
+    }
+  }
+})
+```
+
+## Schema Customization
+
+### schema
+
+Custom schema configuration for the invite plugin.
+
+<ParamField path="schema" type="InferOptionSchema<InviteSchema>">
+  Custom database schema configuration.
+</ParamField>
+
+```ts
+invite({
+  schema: {
+    invite: {
+      fields: {
+        customField: {
+          type: 'string',
+          required: false
+        }
+      }
+    }
+  }
+})
+```
+
+<Note>
+See [Database Schema](/advanced/database-schema) for complete schema reference.
+</Note>

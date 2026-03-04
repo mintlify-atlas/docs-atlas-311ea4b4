@@ -1,0 +1,172 @@
+---
+title: invite()
+description: Server plugin function for Better Auth Invite Plugin
+---
+
+## Overview
+
+The `invite` function is the main server plugin function that adds invitation functionality to your Better Auth instance. It returns a `BetterAuthPlugin` that registers all invite-related endpoints, hooks, and database schemas.
+
+## Import
+
+```typescript
+import { invite } from "@better-auth/invite";
+```
+
+## Signature
+
+```typescript
+function invite<O extends InviteOptions>(opts: O): BetterAuthPlugin
+```
+
+## Parameters
+
+<ParamField path="opts" type="InviteOptions" required>
+  Configuration options for the invite plugin. See the [Options](/api/options) page for complete documentation of all available options.
+</ParamField>
+
+## Returns
+
+<ResponseField name="BetterAuthPlugin" type="object">
+  A Better Auth plugin object containing:
+  
+  <Expandable title="Plugin Structure">
+    <ResponseField name="id" type="string">
+      Plugin identifier: `"invite"`
+    </ResponseField>
+    
+    <ResponseField name="endpoints" type="object">
+      Registered API endpoints:
+      - `createInvite` - Create a new invitation
+      - `activateInvite` - Activate an invitation token
+      - `activateInviteCallback` - Handle post-activation callback
+      - `cancelInvite` - Cancel a pending invitation
+      - `getInvite` - Get invitation details
+      - `rejectInvite` - Reject an invitation
+    </ResponseField>
+    
+    <ResponseField name="hooks" type="object">
+      Plugin hooks for various invite lifecycle events
+    </ResponseField>
+    
+    <ResponseField name="$ERROR_CODES" type="object">
+      Error codes used by the plugin
+    </ResponseField>
+    
+    <ResponseField name="schema" type="object">
+      Database schema for invite and inviteUse tables
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Usage
+
+### Basic Setup
+
+```typescript
+import { betterAuth } from "better-auth";
+import { invite } from "@better-auth/invite";
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        // Send invitation email
+        await sendEmail({
+          to: data.email,
+          subject: "You've been invited!",
+          body: `Click here to accept: ${data.url}`,
+        });
+      },
+    }),
+  ],
+});
+```
+
+### With Custom Options
+
+```typescript
+import { betterAuth } from "better-auth";
+import { invite } from "@better-auth/invite";
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      // Email sending
+      sendUserInvitation: async (data, request) => {
+        await sendEmail({
+          to: data.email,
+          template: data.newAccount ? "new-user-invite" : "role-upgrade",
+          data: {
+            role: data.role,
+            url: data.url,
+            token: data.token,
+          },
+        });
+      },
+      
+      // Permission checks
+      canCreateInvite: async ({ inviterUser, ctx }) => {
+        return inviterUser.role === "admin";
+      },
+      
+      // Token configuration
+      defaultTokenType: "code",
+      invitationTokenExpiresIn: 60 * 60 * 24, // 24 hours
+      
+      // Cleanup
+      cleanupInvitesOnDecision: true,
+      cleanupInvitesAfterMaxUses: true,
+      
+      // Hooks
+      inviteHooks: {
+        afterCreateInvite: async ({ invitation }) => {
+          console.log(`Invite created: ${invitation.id}`);
+        },
+        afterAcceptInvite: async ({ invitedUser }) => {
+          console.log(`User accepted invite: ${invitedUser.id}`);
+        },
+      },
+    }),
+  ],
+});
+```
+
+### With Permission-based Access Control
+
+```typescript
+import { betterAuth } from "better-auth";
+import { invite } from "@better-auth/invite";
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        // Send email implementation
+      },
+      
+      // Using permission objects
+      canCreateInvite: {
+        statement: "user:invite:create",
+        permissions: ["admin", "manager"],
+      },
+      
+      canCancelInvite: {
+        statement: "user:invite:cancel",
+        permissions: ["admin"],
+      },
+    }),
+  ],
+});
+```
+
+## Source Code Reference
+
+Implementation: `src/index.ts:17-36`
+
+## Related
+
+- [Options](/api/options) - Complete InviteOptions configuration
+- [Client Plugin](/api/invite-client) - Client-side plugin setup
+- [Create Invite](/api/endpoints/create-invite) - Creating invitations
+- [Activate Invite](/api/endpoints/activate-invite) - Activating invitations

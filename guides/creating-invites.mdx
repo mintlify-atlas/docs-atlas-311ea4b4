@@ -1,0 +1,385 @@
+---
+title: Creating invites
+description: Create invitation tokens to invite users to your application
+---
+
+## Overview
+
+The invite plugin supports two types of invitations:
+
+- **Private invites**: Sent to a specific email address with email notification
+- **Public invites**: Generic invitation tokens/links that anyone can use
+
+## Private invites
+
+Private invites are sent to a specific email address. The plugin automatically determines if the user needs to create a new account or upgrade their existing role.
+
+### Basic example
+
+```ts
+const result = await authClient.invite.create({
+  email: "user@example.com",
+  role: "member",
+});
+
+// Result: { status: true, message: "The invitation was sent" }
+```
+
+<Note>
+  You must configure `sendUserInvitation` in your server setup to send private invites. See [Email integration](/guides/email-integration).
+</Note>
+
+### Server-side creation
+
+```ts
+const result = await auth.api.createInvite({
+  body: {
+    email: "user@example.com",
+    role: "admin",
+  },
+  headers: request.headers, // Include session cookies
+});
+```
+
+## Public invites
+
+Public invites create a shareable token or URL that anyone can use. Useful for referral programs, open sign-ups, or sharing via social media.
+
+### Create a public invite
+
+```ts
+const result = await authClient.invite.create({
+  role: "member",
+  // No email = public invite
+});
+
+// Result: { status: true, message: "<token or url>" }
+```
+
+The `message` field contains either the token or complete URL, depending on your `senderResponse` configuration.
+
+### Get URL instead of token
+
+```ts
+const result = await authClient.invite.create({
+  role: "member",
+  senderResponse: "url",
+});
+
+// Result: { status: true, message: "http://localhost:3000/invite/abc123?callbackURL=..." }
+```
+
+## Configuration options
+
+All options from `createInviteBodySchema` are available:
+
+<ResponseField name="role" type="string" required>
+  The role to assign to the invited user.
+
+  ```ts
+  role: "admin"
+  ```
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Email address for private invites. Omit for public invites.
+
+  ```ts
+  email: "user@example.com"
+  ```
+</ResponseField>
+
+<ResponseField name="tokenType" type="'token' | 'code' | 'custom'">
+  Type of token to generate. Defaults to server configuration.
+
+  ```ts
+  tokenType: "code" // Generates 6-digit code like "A1B2C3"
+  ```
+</ResponseField>
+
+<ResponseField name="maxUses" type="number">
+  Maximum number of times this invite can be used. Defaults to 1 for private invites, unlimited for public invites.
+
+  ```ts
+  maxUses: 10 // Allow 10 people to use this invite
+  ```
+</ResponseField>
+
+<ResponseField name="expiresIn" type="number">
+  Token expiration time in seconds.
+
+  ```ts
+  expiresIn: 7 * 24 * 60 * 60 // 7 days
+  ```
+</ResponseField>
+
+<ResponseField name="redirectToSignUp" type="string">
+  Where to redirect new users to create their account.
+
+  ```ts
+  redirectToSignUp: "/auth/signup"
+  ```
+</ResponseField>
+
+<ResponseField name="redirectToSignIn" type="string">
+  Where to redirect existing users to sign in.
+
+  ```ts
+  redirectToSignIn: "/auth/login"
+  ```
+</ResponseField>
+
+<ResponseField name="redirectToAfterUpgrade" type="string">
+  Where to redirect users after accepting the invite (when already logged in). Use `{token}` placeholder.
+
+  ```ts
+  redirectToAfterUpgrade: "/dashboard?invite={token}"
+  ```
+</ResponseField>
+
+<ResponseField name="shareInviterName" type="boolean">
+  Whether to share the inviter's name with the invitee.
+
+  ```ts
+  shareInviterName: true
+  ```
+</ResponseField>
+
+<ResponseField name="senderResponse" type="'token' | 'url'">
+  How to return the invite to the sender (public invites only).
+
+  ```ts
+  senderResponse: "url" // Return complete URL instead of token
+  ```
+</ResponseField>
+
+<ResponseField name="senderResponseRedirect" type="'signUp' | 'signIn'">
+  Default redirect type for public invites.
+
+  ```ts
+  senderResponseRedirect: "signIn"
+  ```
+</ResponseField>
+
+<ResponseField name="customInviteUrl" type="string">
+  Custom invite URL template. Use `{token}` and `{callbackUrl}` placeholders.
+
+  ```ts
+  customInviteUrl: "https://myapp.com/join?token={token}&next={callbackUrl}"
+  ```
+</ResponseField>
+
+## Use cases
+
+<Steps>
+
+### Invite new team member (private)
+
+```ts
+await authClient.invite.create({
+  email: "teammate@example.com",
+  role: "member",
+  expiresIn: 7 * 24 * 60 * 60, // 7 days
+});
+```
+
+### Upgrade existing user role (private)
+
+```ts
+await authClient.invite.create({
+  email: "existing.user@example.com",
+  role: "admin",
+});
+```
+
+### Create referral link (public)
+
+```ts
+const result = await authClient.invite.create({
+  role: "member",
+  senderResponse: "url",
+  maxUses: 100,
+  expiresIn: 30 * 24 * 60 * 60, // 30 days
+});
+
+const shareUrl = result.message;
+// Share this URL on social media, email, etc.
+```
+
+### Time-limited signup code (public)
+
+```ts
+const result = await authClient.invite.create({
+  role: "member",
+  tokenType: "code",
+  maxUses: 1,
+  expiresIn: 15 * 60, // 15 minutes
+});
+
+const code = result.message; // e.g., "A1B2C3"
+// Display this code to the user
+```
+
+</Steps>
+
+## Example UI component
+
+<CodeGroup>
+
+```tsx React
+import { useState } from "react";
+import { authClient } from "./client";
+
+function InviteForm() {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("member");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      await authClient.invite.create({
+        email,
+        role,
+      });
+      alert("Invitation sent!");
+      setEmail("");
+    } catch (err) {
+      setError(err.message || "Failed to send invitation");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email address"
+        required
+      />
+      <select value={role} onChange={(e) => setRole(e.target.value)}>
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+      </select>
+      <button type="submit" disabled={loading}>
+        {loading ? "Sending..." : "Send Invite"}
+      </button>
+      {error && <p className="error">{error}</p>}
+    </form>
+  );
+}
+```
+
+```tsx Next.js Server Action
+"use server";
+
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+
+export async function createInvite(email: string, role: string) {
+  try {
+    const result = await auth.api.createInvite({
+      body: { email, role },
+      headers: await headers(),
+    });
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+```
+
+```tsx Next.js Client Component
+"use client";
+
+import { useState } from "react";
+import { createInvite } from "./actions";
+
+export function InviteForm() {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("member");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const result = await createInvite(email, role);
+    
+    if (result.success) {
+      alert("Invitation sent!");
+      setEmail("");
+    } else {
+      alert(result.error);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email address"
+        required
+      />
+      <select value={role} onChange={(e) => setRole(e.target.value)}>
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+      </select>
+      <button type="submit">Send Invite</button>
+    </form>
+  );
+}
+```
+
+</CodeGroup>
+
+## Permission checks
+
+The plugin respects your `canCreateInvite` configuration:
+
+```ts
+// Server configuration
+invite({
+  canCreateInvite: async ({ invitedUser, inviterUser, ctx }) => {
+    // Only admins can invite admins
+    if (invitedUser.role === 'admin' && inviterUser.role !== 'admin') {
+      return false;
+    }
+    return true;
+  },
+})
+```
+
+If permission is denied, the create endpoint throws an error:
+
+```ts
+try {
+  await authClient.invite.create({ email: "admin@example.com", role: "admin" });
+} catch (error) {
+  if (error.errorCode === "INSUFFICIENT_PERMISSIONS") {
+    alert("You don't have permission to create this invite");
+  }
+}
+```
+
+<Warning>
+  Private invites require `sendUserInvitation` to be configured on the server. Attempts to create private invites without email configuration will fail with an `INTERNAL_SERVER_ERROR`.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Activating invites" icon="check" href="/guides/activating-invites">
+    Handle invitation activation flow
+  </Card>
+  <Card title="Email integration" icon="envelope" href="/guides/email-integration">
+    Configure email sending for invitations
+  </Card>
+</CardGroup>

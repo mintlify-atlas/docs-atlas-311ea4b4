@@ -1,0 +1,318 @@
+---
+title: Server setup
+description: Configure the invite plugin on your Better Auth server
+---
+
+## Install the plugin
+
+Add the invite plugin to your Better Auth server configuration:
+
+```ts auth.ts
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth/plugins";
+
+export const auth = betterAuth({
+  database: {
+    // your database configuration
+  },
+  plugins: [
+    invite({
+      // plugin options
+    }),
+  ],
+});
+```
+
+## Configuration options
+
+The invite plugin accepts an `InviteOptions` object with the following configuration:
+
+### Basic options
+
+<ResponseField name="getDate" type="() => Date" default="() => new Date()">
+  A function to generate the current date. Useful for testing or custom date handling.
+</ResponseField>
+
+<ResponseField name="defaultTokenType" type="'token' | 'code' | 'custom'" default="'token'">
+  The default token type to use:
+  - `token`: 24-character token generated with `generateId(24)`
+  - `code`: 6-digit alphanumeric code
+  - `custom`: Uses `generateToken` function
+</ResponseField>
+
+<ResponseField name="generateToken" type="() => string">
+  Custom token generation function. Required when using `defaultTokenType: 'custom'`.
+</ResponseField>
+
+### Redirect options
+
+<ResponseField name="defaultRedirectToSignUp" type="string" default="'/auth/sign-up'">
+  Where to redirect new users to create their account.
+</ResponseField>
+
+<ResponseField name="defaultRedirectToSignIn" type="string" default="'/auth/sign-in'">
+  Where to redirect existing users to sign in.
+</ResponseField>
+
+<ResponseField name="defaultRedirectAfterUpgrade" type="string">
+  Where to redirect users after their role is upgraded. Use `{token}` as a placeholder for the invite token.
+
+  ```ts
+  invite({
+    defaultRedirectAfterUpgrade: "/dashboard?invite={token}",
+  })
+  ```
+</ResponseField>
+
+<ResponseField name="defaultCustomInviteUrl" type="string">
+  Custom invite URL template. Use `{token}` and `{callbackUrl}` placeholders.
+
+  ```ts
+  invite({
+    defaultCustomInviteUrl: "https://myapp.com/join/{token}?callback={callbackUrl}",
+  })
+  ```
+</ResponseField>
+
+### Invitation behavior
+
+<ResponseField name="invitationTokenExpiresIn" type="number" default="3600">
+  Token expiration time in seconds (default: 1 hour).
+</ResponseField>
+
+<ResponseField name="inviteCookieMaxAge" type="number" default="600">
+  Maximum age in seconds for the invitation cookie used during sign-up flow (default: 10 minutes).
+</ResponseField>
+
+<ResponseField name="defaultMaxUses" type="number">
+  Default maximum number of times an invite can be used. Defaults to 1 for private invites and unlimited for public invites.
+</ResponseField>
+
+<ResponseField name="defaultShareInviterName" type="boolean" default="true">
+  Whether to share the inviter's name with the invitee by default.
+</ResponseField>
+
+<ResponseField name="defaultSenderResponse" type="'token' | 'url'" default="'token'">
+  How to return the invite to the sender for public invites (when no email is provided).
+</ResponseField>
+
+<ResponseField name="defaultSenderResponseRedirect" type="'signUp' | 'signIn'" default="'signUp'">
+  Default redirect type for public invites.
+</ResponseField>
+
+### Cleanup options
+
+<ResponseField name="cleanupInvitesOnDecision" type="boolean" default="false">
+  Delete invitations when they are rejected or canceled instead of marking them with a status.
+</ResponseField>
+
+<ResponseField name="cleanupInvitesAfterMaxUses" type="boolean" default="false">
+  Delete invitations after they reach their maximum uses.
+</ResponseField>
+
+### Email integration
+
+<ResponseField name="sendUserInvitation" type="function">
+  Function to send invitation emails. **Required for private invites** (invites with an email address).
+
+  ```ts
+  sendUserInvitation: async (data, request) => {
+    await sendEmail({
+      to: data.email,
+      subject: `You've been invited to join as ${data.role}`,
+      html: `
+        <p>Hi ${data.name || 'there'},</p>
+        <p>Click <a href="${data.url}">here</a> to accept your invitation.</p>
+        <p>Token: ${data.token}</p>
+        <p>${data.newAccount ? 'Create your account' : 'Sign in'} to get started.</p>
+      `,
+    });
+  }
+  ```
+
+  Parameters:
+  - `data.email` - Recipient email address
+  - `data.name` - Recipient name (may be undefined for new users)
+  - `data.role` - Role the user will receive
+  - `data.url` - Complete invitation URL
+  - `data.token` - Invitation token
+  - `data.newAccount` - `true` if this is a new user, `false` if upgrading existing user
+  - `request` - The original HTTP request object
+</ResponseField>
+
+### Permission controls
+
+<ResponseField name="canCreateInvite" type="boolean | function | Permissions" default="true">
+  Controls who can create invitations.
+
+  <Accordion title="Example: Function-based permission">
+    ```ts
+    canCreateInvite: async ({ invitedUser, inviterUser, ctx }) => {
+      // Only admins can create invites
+      return inviterUser.role === 'admin';
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Example: Better Auth admin plugin integration">
+    ```ts
+    canCreateInvite: {
+      statement: 'invite',
+      permissions: ['create'],
+    }
+    ```
+  </Accordion>
+</ResponseField>
+
+<ResponseField name="canAcceptInvite" type="boolean | function | Permissions" default="true">
+  Controls who can accept invitations.
+
+  ```ts
+  canAcceptInvite: async ({ invitedUser, newAccount }) => {
+    // Custom logic to determine if user can accept
+    return true;
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="canCancelInvite" type="boolean | function | Permissions" default="true">
+  Controls who can cancel invitations. Note: Only the user who created the invite can cancel it, regardless of this option.
+
+  ```ts
+  canCancelInvite: async ({ inviterUser, invitation, ctx }) => {
+    return inviterUser.role === 'admin';
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="canRejectInvite" type="boolean | function | Permissions" default="true">
+  Controls who can reject invitations. Note: Only the invitee can reject private invites, regardless of this option.
+
+  ```ts
+  canRejectInvite: async ({ inviteeUser, invitation, ctx }) => {
+    return true;
+  }
+  ```
+</ResponseField>
+
+### Hooks and callbacks
+
+<ResponseField name="inviteHooks" type="object">
+  Lifecycle hooks for invitation events. See [Hooks and callbacks](/guides/hooks-and-callbacks) for details.
+</ResponseField>
+
+<ResponseField name="onInvitationUsed" type="function">
+  Callback triggered when an invitation is successfully used.
+
+  ```ts
+  onInvitationUsed: async ({ invitedUser, newUser, newAccount }, request) => {
+    console.log(`${newUser.email} accepted invite for role ${newUser.role}`);
+    if (newAccount) {
+      // Send welcome email for new users
+    }
+  }
+  ```
+</ResponseField>
+
+### Schema customization
+
+<ResponseField name="schema" type="InferOptionSchema<InviteSchema>">
+  Custom schema modifications for the invite tables. See Better Auth documentation for schema customization.
+</ResponseField>
+
+## Database tables
+
+The invite plugin creates two tables in your database:
+
+### invite table
+
+- `id` - Primary key
+- `token` - Unique invitation token
+- `createdAt` - Creation timestamp
+- `expiresAt` - Expiration timestamp
+- `maxUses` - Maximum number of times this invite can be used
+- `createdByUserId` - ID of the user who created the invite
+- `redirectToAfterUpgrade` - Custom redirect URL after upgrade
+- `shareInviterName` - Whether to share inviter name
+- `email` - Email for private invites (optional)
+- `role` - Role to assign to invited user
+- `newAccount` - Whether this is for a new account (private invites only)
+- `status` - Invitation status: `pending`, `rejected`, `canceled`, or `used`
+
+### inviteUse table
+
+- `id` - Primary key
+- `inviteId` - Reference to invite
+- `usedAt` - Timestamp when invite was used
+- `usedByUserId` - ID of user who used the invite
+
+<Note>
+  The plugin automatically handles schema migration when you add it to your Better Auth configuration.
+</Note>
+
+## Complete example
+
+```ts auth.ts
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth/plugins";
+import { sendEmail } from "./email";
+
+export const auth = betterAuth({
+  database: {
+    // your database configuration
+  },
+  plugins: [
+    invite({
+      // Token configuration
+      defaultTokenType: "token",
+      invitationTokenExpiresIn: 7 * 24 * 60 * 60, // 7 days
+      
+      // Redirects
+      defaultRedirectToSignUp: "/auth/signup",
+      defaultRedirectToSignIn: "/auth/login",
+      defaultRedirectAfterUpgrade: "/dashboard?welcome=true",
+      
+      // Permissions
+      canCreateInvite: async ({ inviterUser }) => {
+        return inviterUser.role === 'admin' || inviterUser.role === 'manager';
+      },
+      
+      // Email integration
+      sendUserInvitation: async (data) => {
+        await sendEmail({
+          to: data.email,
+          subject: `Join our platform as ${data.role}`,
+          html: `
+            <h1>You've been invited!</h1>
+            <p>Click <a href="${data.url}">here</a> to accept.</p>
+            <p>${data.newAccount ? 'Create your account' : 'Sign in'} to get started.</p>
+          `,
+        });
+      },
+      
+      // Lifecycle callback
+      onInvitationUsed: async ({ newUser, newAccount }) => {
+        console.log(`User ${newUser.email} joined as ${newUser.role}`);
+      },
+      
+      // Cleanup
+      cleanupInvitesAfterMaxUses: true,
+    }),
+  ],
+});
+```
+
+<Warning>
+  You must configure `sendUserInvitation` to use private invites (invites with an email address). Without this, attempts to create private invites will fail.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Client setup" icon="react" href="/guides/client-setup">
+    Set up the invite plugin on your client
+  </Card>
+  <Card title="Creating invites" icon="envelope" href="/guides/creating-invites">
+    Learn how to create invitations
+  </Card>
+</CardGroup>

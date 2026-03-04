@@ -1,0 +1,315 @@
+---
+title: Get Invite
+description: GET /invite/get - Get invitation details
+---
+
+## Endpoint
+
+```
+GET /invite/get
+```
+
+Get basic information about an invitation, including details about the inviter. For private invites (with email), the requester's email must match the invitation email.
+
+## Authentication
+
+This endpoint supports optional authentication:
+- **Public invites**: No authentication required
+- **Private invites**: Authentication required, and the logged-in user's email must match the invitation email
+
+## Query Parameters
+
+<ParamField path="token" type="string" required>
+  The invitation token to look up.
+  
+  ```
+  GET /invite/get?token=abc123xyz789
+  ```
+</ParamField>
+
+## Response
+
+### Success Response (200)
+
+<ResponseField name="status" type="boolean">
+  Always `true` on success.
+</ResponseField>
+
+<ResponseField name="inviter" type="object">
+  Information about the user who created the invitation.
+  
+  <Expandable title="Inviter Object">
+    <ResponseField name="email" type="string">
+      The inviter's email address.
+    </ResponseField>
+    
+    <ResponseField name="name" type="string | null">
+      The inviter's name, if available and if `shareInviterName` was enabled for this invitation.
+    </ResponseField>
+    
+    <ResponseField name="image" type="string | null">
+      The inviter's profile image URL, if available.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="invitation" type="object">
+  Information about the invitation itself.
+  
+  <Expandable title="Invitation Object">
+    <ResponseField name="email" type="string | null">
+      The email address this invitation is for. `null` for public invites.
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp when the invitation was created.
+    </ResponseField>
+    
+    <ResponseField name="role" type="string">
+      The role that will be assigned when the invitation is accepted.
+    </ResponseField>
+    
+    <ResponseField name="newAccount" type="boolean">
+      Whether this invitation is for a new account (`true`) or an existing account upgrade (`false`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Get Public Invite Details
+
+**Request:**
+
+```bash
+GET /invite/get?token=abc123xyz789
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "inviter": {
+    "email": "admin@example.com",
+    "name": "John Admin",
+    "image": "https://example.com/avatars/john.jpg"
+  },
+  "invitation": {
+    "email": null,
+    "createdAt": "2026-03-04T10:30:00.000Z",
+    "role": "member",
+    "newAccount": true
+  }
+}
+```
+
+This is a public invite (no specific email) that will assign the "member" role.
+
+### Get Private Invite Details
+
+**Request:**
+
+```bash
+GET /invite/get?token=private-invite-token
+Cookie: better-auth.session_token=...
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "inviter": {
+    "email": "manager@example.com",
+    "name": "Sarah Manager",
+    "image": null
+  },
+  "invitation": {
+    "email": "newuser@example.com",
+    "createdAt": "2026-03-04T14:20:00.000Z",
+    "role": "editor",
+    "newAccount": true
+  }
+}
+```
+
+This is a private invite for `newuser@example.com` to become an "editor". The requester must be logged in with that email to access this information.
+
+### Get Invite for Existing User Upgrade
+
+**Request:**
+
+```bash
+GET /invite/get?token=upgrade-token
+Cookie: better-auth.session_token=...
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "inviter": {
+    "email": "admin@example.com",
+    "name": "Admin User",
+    "image": "https://example.com/avatars/admin.jpg"
+  },
+  "invitation": {
+    "email": "existinguser@example.com",
+    "createdAt": "2026-03-04T09:15:00.000Z",
+    "role": "admin",
+    "newAccount": false
+  }
+}
+```
+
+This invitation is for an existing user (`newAccount: false`) to upgrade to the "admin" role.
+
+### Get Invite with Anonymous Inviter
+
+**Request:**
+
+```bash
+GET /invite/get?token=anonymous-invite
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "inviter": {
+    "email": "admin@example.com",
+    "name": null,
+    "image": null
+  },
+  "invitation": {
+    "email": null,
+    "createdAt": "2026-03-04T16:45:00.000Z",
+    "role": "member",
+    "newAccount": true
+  }
+}
+```
+
+When `shareInviterName` was set to `false`, the inviter's name is not shared (returns `null`).
+
+## Error Responses
+
+### Invalid Token (400)
+
+```json
+{
+  "message": "Invalid or non-existent token",
+  "errorCode": "INVALID_TOKEN"
+}
+```
+
+Returned when:
+- Token doesn't exist in the database
+- Token has expired
+- For private invites: Requester is not authenticated
+- For private invites: Requester's email doesn't match the invitation email
+- Invitation has been canceled or rejected
+
+### Inviter Not Found (400)
+
+```json
+{
+  "message": "Inviter not found",
+  "errorCode": "INVITER_NOT_FOUND"
+}
+```
+
+Returned when:
+- The user who created the invitation no longer exists in the database
+
+## Behavior
+
+### Public Invites (no email)
+
+1. Validates the invitation token exists
+2. Retrieves inviter information
+3. Returns invitation and inviter details
+4. Anyone can access public invite details
+
+### Private Invites (with email)
+
+1. Validates the invitation token exists
+2. Checks if the requester is authenticated
+3. Verifies the requester's email matches the invitation email
+4. Retrieves inviter information
+5. Returns invitation and inviter details
+6. Only the invited user can access private invite details
+
+## Use Cases
+
+### Display Invitation Information
+
+Before activating an invitation, you can use this endpoint to show the user:
+- Who invited them
+- What role they'll receive
+- Whether they need to create a new account or upgrade existing one
+
+```typescript
+const { inviter, invitation } = await authClient.invite.getInvite({ token });
+
+console.log(`${inviter.name} invited you to join as ${invitation.role}`);
+
+if (invitation.newAccount) {
+  console.log('You will need to create a new account');
+} else {
+  console.log('Your role will be upgraded to', invitation.role);
+}
+```
+
+### Validate Invitation Before Accepting
+
+Check if an invitation is valid before proceeding with the activation flow:
+
+```typescript
+try {
+  const inviteDetails = await authClient.invite.getInvite({ token });
+  // Invitation is valid, proceed with activation
+  showInvitationUI(inviteDetails);
+} catch (error) {
+  // Invalid or expired invitation
+  showErrorMessage('This invitation is invalid or has expired');
+}
+```
+
+### Display Inviter Information
+
+Show a personalized message with the inviter's details:
+
+```jsx
+const InvitationCard = ({ token }) => {
+  const { inviter, invitation } = useInviteDetails(token);
+  
+  return (
+    <div>
+      {inviter.image && <img src={inviter.image} alt={inviter.name} />}
+      <p>{inviter.name} has invited you to join as {invitation.role}</p>
+      <p>Invitation sent on {new Date(invitation.createdAt).toLocaleDateString()}</p>
+    </div>
+  );
+};
+```
+
+## Privacy Considerations
+
+- The `shareInviterName` setting controls whether the inviter's name is shared
+- Private invites can only be viewed by the intended recipient
+- Public invite details are accessible to anyone with the token
+
+## Source Code Reference
+
+Implementation: `src/routes/get-invite.ts:9-137`
+
+## Related
+
+- [Create Invite](/api/endpoints/create-invite) - Create a new invitation
+- [Activate Invite](/api/endpoints/activate-invite) - Activate an invitation token
+- [InviteType](/api/types/invite-type) - Invitation data structure
+- [InviteOptions](/api/options) - Plugin configuration options

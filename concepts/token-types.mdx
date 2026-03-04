@@ -1,0 +1,462 @@
+---
+title: Token types
+description: Understanding token generation options in the Better Auth Invite Plugin
+---
+
+The Better Auth Invite Plugin supports three token generation strategies: default tokens, short codes, and custom generators. Each serves different use cases and security requirements.
+
+## Token types overview
+
+The plugin defines three token types:
+
+```typescript
+type TokensType = "token" | "code" | "custom";
+```
+
+Source: [src/types.ts:341](file:///home/daytona/workspace/source/src/types.ts)
+
+## Default token generation
+
+The default token type generates a secure 24-character random string.
+
+### Using default tokens
+
+```typescript
+const result = await client.invite.create({
+  email: "user@example.com",
+  role: "member",
+  tokenType: "token",  // or omit for default
+});
+
+// Generates: "5f9a8b7c6d5e4f3a2b1c0d9e"
+```
+
+### Token generation implementation
+
+```typescript
+import { generateId } from "better-auth";
+
+const tokenGenerators: Record<TokensType, () => string> = {
+  token: () => generateId(24),  // 24 random characters
+  // ...
+};
+```
+
+Source: [src/utils.ts:76-79](file:///home/daytona/workspace/source/src/utils.ts)
+
+### Default token characteristics
+
+<CardGroup cols={2}>
+  <Card title="Length" icon="ruler">
+    24 characters
+  </Card>
+  <Card title="Character set" icon="font">
+    Alphanumeric (a-z, A-Z, 0-9)
+  </Card>
+  <Card title="Security" icon="shield-halved">
+    Cryptographically secure random generation
+  </Card>
+  <Card title="Use case" icon="link">
+    URL-safe invitation links
+  </Card>
+</CardGroup>
+
+### Setting as default
+
+```typescript
+import { invite } from "better-auth-invite";
+
+export const auth = betterAuth({
+  plugins: [
+    invite({
+      defaultTokenType: "token",  // Default value
+    }),
+  ],
+});
+```
+
+Source: [src/types.ts:96](file:///home/daytona/workspace/source/src/types.ts)
+
+## Code generation
+
+Code type generates a short, user-friendly 6-character code ideal for manual entry.
+
+### Using code tokens
+
+```typescript
+const result = await client.invite.create({
+  email: "user@example.com",
+  role: "member",
+  tokenType: "code",
+});
+
+// Generates: "A1B2C3"
+```
+
+### Code generation implementation
+
+```typescript
+import { generateRandomString } from "better-auth/crypto";
+
+const tokenGenerators: Record<TokensType, () => string> = {
+  code: () => generateRandomString(6, "0-9", "A-Z"),
+  // ...
+};
+```
+
+Source: [src/utils.ts:77](file:///home/daytona/workspace/source/src/utils.ts)
+
+### Code characteristics
+
+<CardGroup cols={2}>
+  <Card title="Length" icon="ruler">
+    6 characters
+  </Card>
+  <Card title="Character set" icon="font">
+    Uppercase letters and numbers (A-Z, 0-9)
+  </Card>
+  <Card title="Readability" icon="eye">
+    Easy to read and communicate verbally
+  </Card>
+  <Card title="Use case" icon="keyboard">
+    Manual entry in forms or mobile apps
+  </Card>
+</CardGroup>
+
+### Code token use cases
+
+<AccordionGroup>
+  <Accordion title="Mobile app onboarding">
+    ```typescript
+    // Generate code for mobile app
+    const { message } = await client.invite.create({
+      role: "user",
+      tokenType: "code",
+      senderResponse: "token",
+    });
+    
+    // Display to user: "Enter code: A1B2C3"
+    ```
+  </Accordion>
+  
+  <Accordion title="Phone support">
+    ```typescript
+    // Agent creates code for customer
+    const { message } = await client.invite.create({
+      email: "customer@example.com",
+      role: "customer",
+      tokenType: "code",
+    });
+    
+    // Agent reads code over phone: "A1B2C3"
+    ```
+  </Accordion>
+  
+  <Accordion title="Event check-in">
+    ```typescript
+    // Generate codes for event badges
+    const attendeeCodes = await Promise.all(
+      attendees.map(async (attendee) => {
+        const { message } = await client.invite.create({
+          email: attendee.email,
+          role: "attendee",
+          tokenType: "code",
+        });
+        return { email: attendee.email, code: message };
+      })
+    );
+    ```
+  </Accordion>
+  
+  <Accordion title="Two-step verification">
+    ```typescript
+    // Generate verification code
+    const { message } = await client.invite.create({
+      role: "verified-user",
+      tokenType: "code",
+      expiresIn: 300,  // 5 minutes
+      maxUses: 1,
+    });
+    
+    // Send via SMS or display in app
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Custom token generation
+
+For advanced use cases, you can provide your own token generation logic.
+
+### Implementing custom tokens
+
+```typescript
+import { invite } from "better-auth-invite";
+import { randomBytes } from "crypto";
+
+export const auth = betterAuth({
+  plugins: [
+    invite({
+      defaultTokenType: "custom",
+      generateToken: () => {
+        // Custom logic here
+        return randomBytes(32).toString("hex");
+      },
+    }),
+  ],
+});
+```
+
+Source: [src/types.ts:86-88](file:///home/daytona/workspace/source/src/types.ts)
+
+### Custom token resolution
+
+The plugin resolves custom tokens with a secure fallback:
+
+```typescript
+export const resolveTokenGenerator = (
+  tokenType: TokensType,
+  options: NewInviteOptions,
+): (() => string) => {
+  if (tokenType === "custom" && options.generateToken) {
+    return options.generateToken;
+  }
+
+  const tokenGenerators: Record<TokensType, () => string> = {
+    code: () => generateRandomString(6, "0-9", "A-Z"),
+    token: () => generateId(24),
+    custom: () => generateId(24), // Secure fallback
+  };
+
+  return tokenGenerators[tokenType];
+};
+```
+
+Source: [src/utils.ts:68-83](file:///home/daytona/workspace/source/src/utils.ts)
+
+<Warning>
+If you specify `tokenType: "custom"` without providing `generateToken`, the plugin falls back to the default 24-character token generator for security.
+</Warning>
+
+### Custom token examples
+
+<AccordionGroup>
+  <Accordion title="UUID-based tokens">
+    ```typescript
+    import { randomUUID } from "crypto";
+    
+    invite({
+      generateToken: () => randomUUID(),
+    });
+    
+    // Generates: "123e4567-e89b-12d3-a456-426614174000"
+    ```
+  </Accordion>
+  
+  <Accordion title="Prefixed tokens">
+    ```typescript
+    import { generateId } from "better-auth";
+    
+    invite({
+      generateToken: () => `inv_${generateId(20)}`,
+    });
+    
+    // Generates: "inv_a1b2c3d4e5f6g7h8i9j0"
+    ```
+  </Accordion>
+  
+  <Accordion title="Timestamp-based tokens">
+    ```typescript
+    import { generateId } from "better-auth";
+    
+    invite({
+      generateToken: () => {
+        const timestamp = Date.now().toString(36);
+        const random = generateId(16);
+        return `${timestamp}-${random}`;
+      },
+    });
+    
+    // Generates: "lx4y2z-a1b2c3d4e5f6g7h8"
+    ```
+  </Accordion>
+  
+  <Accordion title="Checksum-validated tokens">
+    ```typescript
+    import { createHash } from "crypto";
+    import { generateId } from "better-auth";
+    
+    invite({
+      generateToken: () => {
+        const payload = generateId(20);
+        const checksum = createHash("sha256")
+          .update(payload)
+          .digest("hex")
+          .substring(0, 4);
+        return `${payload}-${checksum}`;
+      },
+    });
+    
+    // Generates: "a1b2c3d4e5f6g7h8i9j0-7f3a"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Per-invite token type
+
+You can override the default token type for individual invitations:
+
+```typescript
+// Default is "token"
+invite({
+  defaultTokenType: "token",
+});
+
+// Override for specific invitations
+await client.invite.create({
+  role: "beta-user",
+  tokenType: "code",  // Use code for this invite
+});
+
+await client.invite.create({
+  role: "admin",
+  tokenType: "custom",  // Use custom for this invite
+});
+```
+
+Source: [src/body.ts:21-26](file:///home/daytona/workspace/source/src/body.ts)
+
+## Security considerations
+
+### Token entropy
+
+Different token types have different security characteristics:
+
+| Token Type | Length | Character Set | Entropy | Brute Force Resistance |
+|------------|--------|---------------|---------|------------------------|
+| `token` | 24 | 62 chars (a-z, A-Z, 0-9) | ~143 bits | Excellent |
+| `code` | 6 | 36 chars (A-Z, 0-9) | ~31 bits | Moderate |
+| `custom` | Variable | Variable | Variable | Depends on implementation |
+
+<Warning>
+**Code tokens are less secure** due to their shorter length. Always use additional security measures:
+
+- Set short expiration times
+- Limit `maxUses` to 1
+- Implement rate limiting
+- Use only for low-risk operations
+</Warning>
+
+### Recommended practices
+
+#### For default tokens (links)
+
+```typescript
+invite({
+  defaultTokenType: "token",
+  invitationTokenExpiresIn: 24 * 60 * 60,  // 24 hours
+});
+```
+
+<Check>
+Default tokens are cryptographically secure and suitable for sensitive operations like admin invitations.
+</Check>
+
+#### For codes (manual entry)
+
+```typescript
+await client.invite.create({
+  role: "user",
+  tokenType: "code",
+  expiresIn: 600,        // 10 minutes (short expiry)
+  maxUses: 1,            // Single use only
+});
+```
+
+<Warning>
+Always limit code validity period due to lower entropy.
+</Warning>
+
+#### For custom tokens
+
+```typescript
+import { randomBytes } from "crypto";
+
+invite({
+  generateToken: () => {
+    // Ensure minimum 128 bits of entropy
+    return randomBytes(16).toString("base64url");
+  },
+});
+```
+
+<Check>
+Use cryptographically secure random number generators from `crypto` module.
+</Check>
+
+## Token storage
+
+All tokens are stored in the `invite` table with a unique constraint:
+
+```typescript
+{
+  invite: {
+    fields: {
+      token: { 
+        type: "string", 
+        unique: true  // Enforces uniqueness
+      },
+      // ...
+    }
+  }
+}
+```
+
+Source: [src/schema.ts:6](file:///home/daytona/workspace/source/src/schema.ts)
+
+<Note>
+The unique constraint ensures no two invitations can have the same token, preventing conflicts regardless of token type.
+</Note>
+
+## Token in URLs
+
+Tokens are used in invitation URLs:
+
+```typescript
+const url = `${baseURL}/invite/${token}?callbackURL=${callbackURL}`;
+```
+
+All three token types are URL-safe:
+
+- **token**: `a-zA-Z0-9` characters
+- **code**: `A-Z0-9` characters
+- **custom**: Should generate URL-safe strings
+
+Source: [src/utils.ts:309](file:///home/daytona/workspace/source/src/utils.ts)
+
+<Tip>
+If your custom generator includes special characters, use `encodeURIComponent()` or generate URL-safe tokens using `base64url` encoding.
+</Tip>
+
+## Token validation
+
+All token types go through the same validation:
+
+```typescript
+// 1. Token exists
+const invitation = await adapter.findInvitation(token);
+if (!invitation) throw error("INVALID_TOKEN");
+
+// 2. Not expired
+if (getDate() > invitation.expiresAt) throw error("INVALID_TOKEN");
+
+// 3. Usage limit not exceeded
+const timesUsed = await adapter.countInvitationUses(invitation.id);
+if (timesUsed >= invitation.maxUses) throw error("NO_USES_LEFT");
+
+// 4. Status is pending
+if (invitation.status !== "pending") throw error("INVALID_TOKEN");
+```
+
+Source: [src/routes/activate-invite-logic.ts:29-47](file:///home/daytona/workspace/source/src/routes/activate-invite-logic.ts)
+
+Validation is identical regardless of token type, ensuring consistent security.

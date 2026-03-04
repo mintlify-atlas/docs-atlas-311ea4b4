@@ -1,0 +1,359 @@
+---
+title: Permissions Type
+description: Permission configuration for invitation access control
+---
+
+## Overview
+
+The `Permissions` type provides a declarative way to configure role-based access control for invitation operations. It can be used as an alternative to function-based permission checks.
+
+## Type Definition
+
+```typescript
+export type Permissions = {
+  statement: string;
+  permissions: string[];
+};
+```
+
+## Fields
+
+<ParamField path="statement" type="string" required>
+  A descriptive statement identifying the permission being checked. This is typically formatted as `resource:action:operation` but can be any string that helps identify the permission.
+  
+  **Examples:**
+  - `"user:invite:create"`
+  - `"user:invite:cancel"`
+  - `"user:invite:accept"`
+  - `"user:invite:reject"`
+</ParamField>
+
+<ParamField path="permissions" type="string[]" required>
+  Array of role names that have permission to perform the action. Users with any of these roles will be granted access.
+  
+  **Examples:**
+  - `["admin"]` - Only admins
+  - `["admin", "manager"]` - Admins and managers
+  - `["member", "editor", "admin"]` - All authenticated users with these roles
+</ParamField>
+
+## Usage
+
+The `Permissions` type can be used with any of the `can*` options in `InviteOptions`:
+
+- `canCreateInvite`
+- `canAcceptInvite`
+- `canCancelInvite`
+- `canRejectInvite`
+
+### Basic Permission Configuration
+
+```typescript
+import { invite } from "@better-auth/invite";
+import type { Permissions } from "@better-auth/invite";
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        // Email implementation
+      },
+      
+      // Only admins can create invites
+      canCreateInvite: {
+        statement: "user:invite:create",
+        permissions: ["admin"],
+      },
+    }),
+  ],
+});
+```
+
+### Multiple Roles
+
+```typescript
+import { invite } from "@better-auth/invite";
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        // Email implementation
+      },
+      
+      // Admins and managers can create invites
+      canCreateInvite: {
+        statement: "user:invite:create",
+        permissions: ["admin", "manager"],
+      },
+      
+      // Only admins can cancel invites
+      canCancelInvite: {
+        statement: "user:invite:cancel",
+        permissions: ["admin"],
+      },
+    }),
+  ],
+});
+```
+
+### All Permission Options
+
+```typescript
+import { invite } from "@better-auth/invite";
+import type { Permissions } from "@better-auth/invite";
+
+const createPermission: Permissions = {
+  statement: "user:invite:create",
+  permissions: ["admin", "manager"],
+};
+
+const acceptPermission: Permissions = {
+  statement: "user:invite:accept",
+  permissions: ["member", "editor", "admin"],
+};
+
+const cancelPermission: Permissions = {
+  statement: "user:invite:cancel",
+  permissions: ["admin"],
+};
+
+const rejectPermission: Permissions = {
+  statement: "user:invite:reject",
+  permissions: ["member", "editor", "admin"],
+};
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        // Email implementation
+      },
+      canCreateInvite: createPermission,
+      canAcceptInvite: acceptPermission,
+      canCancelInvite: cancelPermission,
+      canRejectInvite: rejectPermission,
+    }),
+  ],
+});
+```
+
+## How It Works
+
+When a `Permissions` object is used:
+
+1. The plugin extracts the user's role from the session
+2. Checks if the user's role is in the `permissions` array
+3. Grants or denies access based on the match
+
+Internal implementation (simplified):
+
+```typescript
+async function checkPermissions(
+  ctx: GenericEndpointContext,
+  permissions: Permissions
+): Promise<boolean> {
+  const user = ctx.context.session.user as UserWithRole;
+  return permissions.permissions.includes(user.role);
+}
+```
+
+## Function vs Permissions Object
+
+You can use either a function or a `Permissions` object:
+
+### Using Function (More Flexible)
+
+```typescript
+canCreateInvite: async ({ inviterUser, invitedUser, ctx }) => {
+  // Complex logic
+  if (inviterUser.role === "admin") return true;
+  if (inviterUser.role === "manager" && invitedUser.role !== "admin") {
+    return true;
+  }
+  return false;
+}
+```
+
+**Pros:**
+- Full control over logic
+- Access to all context data
+- Can implement complex conditions
+
+**Cons:**
+- More verbose
+- Requires manual implementation
+
+### Using Permissions Object (Simpler)
+
+```typescript
+canCreateInvite: {
+  statement: "user:invite:create",
+  permissions: ["admin", "manager"],
+}
+```
+
+**Pros:**
+- Clean, declarative syntax
+- Easy to read and maintain
+- Consistent across different operations
+
+**Cons:**
+- Less flexible
+- Only supports role-based checks
+- Cannot access context data
+
+## Examples
+
+### Hierarchical Permissions
+
+```typescript
+import { invite } from "@better-auth/invite";
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        // Email implementation
+      },
+      
+      // Super admins and admins can create any invite
+      canCreateInvite: {
+        statement: "user:invite:create",
+        permissions: ["super_admin", "admin"],
+      },
+      
+      // Everyone can accept invites
+      canAcceptInvite: true,
+      
+      // Only super admins can cancel invites
+      canCancelInvite: {
+        statement: "user:invite:cancel",
+        permissions: ["super_admin"],
+      },
+      
+      // Anyone can reject their own invite (additional email check happens in endpoint)
+      canRejectInvite: true,
+    }),
+  ],
+});
+```
+
+### Team-based Permissions
+
+```typescript
+import { invite } from "@better-auth/invite";
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        // Email implementation
+      },
+      
+      // Team owners and admins can invite
+      canCreateInvite: {
+        statement: "team:member:invite",
+        permissions: ["team_owner", "team_admin"],
+      },
+      
+      // Members, editors, and admins can accept
+      canAcceptInvite: {
+        statement: "team:member:accept",
+        permissions: ["team_member", "team_editor", "team_admin"],
+      },
+    }),
+  ],
+});
+```
+
+### Mixed Approach
+
+```typescript
+import { invite } from "@better-auth/invite";
+
+const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data) => {
+        // Email implementation
+      },
+      
+      // Simple role check
+      canCreateInvite: {
+        statement: "user:invite:create",
+        permissions: ["admin", "manager"],
+      },
+      
+      // Complex logic with function
+      canAcceptInvite: async ({ invitedUser, newAccount }) => {
+        // New accounts always allowed
+        if (newAccount) return true;
+        
+        // Existing users must have verified email
+        return invitedUser.emailVerified === true;
+      },
+      
+      // Simple role check
+      canCancelInvite: {
+        statement: "user:invite:cancel",
+        permissions: ["admin"],
+      },
+    }),
+  ],
+});
+```
+
+## Error Handling
+
+When permission is denied, the endpoint returns:
+
+```json
+{
+  "message": "User does not have sufficient permissions to create invite",
+  "errorCode": "INSUFFICIENT_PERMISSIONS"
+}
+```
+
+## Integration with Better Auth Roles
+
+This works seamlessly with Better Auth's role system. Make sure you have the role plugin configured:
+
+```typescript
+import { betterAuth } from "better-auth";
+import { invite } from "@better-auth/invite";
+
+const auth = betterAuth({
+  // ... other config
+  
+  plugins: [
+    // Role plugin should be configured first
+    rolePlugin({
+      roles: ["admin", "manager", "member"],
+    }),
+    
+    // Then invite plugin can use those roles
+    invite({
+      sendUserInvitation: async (data) => {
+        // Email implementation
+      },
+      canCreateInvite: {
+        statement: "user:invite:create",
+        permissions: ["admin", "manager"], // These match the roles above
+      },
+    }),
+  ],
+});
+```
+
+## Source Code Reference
+
+Type definition: `src/types.ts:358-361`
+
+Permission checking: `src/utils.ts` (in `checkPermissions` function)
+
+## Related
+
+- [InviteOptions](/api/options) - Complete plugin configuration
+- [invite()](/api/invite) - Main plugin function
+- Better Auth Role Plugin - For role management

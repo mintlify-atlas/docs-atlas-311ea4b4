@@ -1,0 +1,245 @@
+---
+title: Client setup
+description: Configure the invite plugin client for your frontend application
+---
+
+## Install the client plugin
+
+Add the invite client plugin to your Better Auth client configuration:
+
+```ts client.ts
+import { createAuthClient } from "better-auth/client";
+import { inviteClient } from "better-auth/client/plugins";
+
+export const authClient = createAuthClient({
+  baseURL: "http://localhost:3000", // Your API base URL
+  plugins: [inviteClient()],
+});
+```
+
+## Available methods
+
+The invite client plugin automatically generates type-safe methods for all invite endpoints. Here's what becomes available on your client:
+
+### Create invitation
+
+```ts
+const result = await authClient.invite.create({
+  email: "user@example.com",
+  role: "member",
+});
+```
+
+### Activate invitation
+
+```ts
+const result = await authClient.invite.activate({
+  token: "invitation-token",
+  callbackURL: "/dashboard",
+});
+```
+
+### Get invitation details
+
+```ts
+const invite = await authClient.invite.get({
+  token: "invitation-token",
+});
+```
+
+### Cancel invitation
+
+```ts
+const result = await authClient.invite.cancel({
+  token: "invitation-token",
+});
+```
+
+### Reject invitation
+
+```ts
+const result = await authClient.invite.reject({
+  token: "invitation-token",
+});
+```
+
+## Type inference
+
+The invite client plugin provides full type inference based on your server configuration:
+
+```ts
+import type { InferServerPlugin } from "better-auth/client";
+import type { invite } from "better-auth/plugins";
+
+// Your client methods are fully typed
+type InvitePlugin = InferServerPlugin<typeof invite>;
+```
+
+<Note>
+  The client plugin automatically infers available endpoints and their request/response types from your server configuration.
+</Note>
+
+## Framework integration
+
+The invite client works seamlessly with Better Auth's framework integrations:
+
+<Tabs>
+  <Tab title="React">
+    ```tsx
+    import { useSession } from "better-auth/react";
+    import { authClient } from "./client";
+
+    function InviteButton() {
+      const { data: session } = useSession();
+
+      const handleInvite = async () => {
+        try {
+          await authClient.invite.create({
+            email: "newuser@example.com",
+            role: "member",
+          });
+          alert("Invitation sent!");
+        } catch (error) {
+          console.error("Failed to send invite:", error);
+        }
+      };
+
+      if (session?.user.role !== "admin") {
+        return null;
+      }
+
+      return <button onClick={handleInvite}>Send Invite</button>;
+    }
+    ```
+  </Tab>
+  <Tab title="Vue">
+    ```vue
+    <script setup lang="ts">
+    import { authClient } from "./client";
+    import { ref } from "vue";
+
+    const email = ref("");
+
+    const sendInvite = async () => {
+      try {
+        await authClient.invite.create({
+          email: email.value,
+          role: "member",
+        });
+        alert("Invitation sent!");
+      } catch (error) {
+        console.error("Failed to send invite:", error);
+      }
+    };
+    </script>
+
+    <template>
+      <div>
+        <input v-model="email" placeholder="Email address" />
+        <button @click="sendInvite">Send Invite</button>
+      </div>
+    </template>
+    ```
+  </Tab>
+  <Tab title="Svelte">
+    ```svelte
+    <script lang="ts">
+    import { authClient } from "./client";
+
+    let email = "";
+
+    async function sendInvite() {
+      try {
+        await authClient.invite.create({
+          email,
+          role: "member",
+        });
+        alert("Invitation sent!");
+      } catch (error) {
+        console.error("Failed to send invite:", error);
+      }
+    }
+    </script>
+
+    <input bind:value={email} placeholder="Email address" />
+    <button on:click={sendInvite}>Send Invite</button>
+    ```
+  </Tab>
+</Tabs>
+
+## Error handling
+
+Handle errors from invite operations using try-catch blocks:
+
+```ts
+try {
+  await authClient.invite.create({
+    email: "user@example.com",
+    role: "admin",
+  });
+} catch (error) {
+  if (error.errorCode === "INSUFFICIENT_PERMISSIONS") {
+    alert("You don't have permission to create invites");
+  } else if (error.errorCode === "INVALID_TOKEN") {
+    alert("The invitation token is invalid or expired");
+  } else {
+    alert("An error occurred");
+  }
+}
+```
+
+### Common error codes
+
+- `INSUFFICIENT_PERMISSIONS` - User lacks permission for the operation
+- `INVALID_TOKEN` - Token is invalid, expired, or already used
+- `INVALID_EMAIL` - Email doesn't match the invite recipient
+- `CANT_ACCEPT_INVITE` - User cannot accept this invitation
+- `CANT_REJECT_INVITE` - User cannot reject this invitation
+- `NO_USES_LEFT_FOR_INVITE` - Invite has reached maximum uses
+- `INVITER_NOT_FOUND` - The user who created the invite no longer exists
+
+## URL-based activation
+
+For invitation links (callback flow), you can use the activation callback endpoint directly:
+
+```ts
+// The user clicks a link like:
+// https://yourapp.com/api/auth/invite/TOKEN?callbackURL=/dashboard
+
+// Better Auth automatically handles this and redirects the user
+// to the callbackURL with the token in a cookie
+```
+
+If you need to activate programmatically after the user follows a link:
+
+```ts
+// In your page component
+const searchParams = new URLSearchParams(window.location.search);
+const token = searchParams.get("token");
+
+if (token) {
+  const result = await authClient.invite.activate({
+    token,
+    callbackURL: window.location.pathname,
+  });
+
+  if (result.action === "SIGN_IN_UP_REQUIRED") {
+    // Redirect user to sign in/up page
+    window.location.href = result.redirectTo;
+  } else {
+    // User is logged in, redirect to dashboard
+    window.location.href = result.redirectTo;
+  }
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Creating invites" icon="envelope" href="/guides/creating-invites">
+    Learn how to create invitations
+  </Card>
+  <Card title="Activating invites" icon="check" href="/guides/activating-invites">
+    Handle invitation activation flow
+  </Card>
+</CardGroup>

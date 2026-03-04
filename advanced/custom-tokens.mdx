@@ -1,0 +1,328 @@
+---
+title: Custom Tokens
+description: Implement custom token generation for invitations
+---
+
+The invite plugin supports custom token generation, allowing you to implement your own token format and generation logic.
+
+## Token Types
+
+The plugin provides three token types:
+
+<CardGroup cols={3}>
+  <Card title="Token" icon="key">
+    24-character secure ID
+  </Card>
+  <Card title="Code" icon="hashtag">
+    6-character alphanumeric code
+  </Card>
+  <Card title="Custom" icon="wand-magic-sparkles">
+    Your own implementation
+  </Card>
+</CardGroup>
+
+## Built-in Token Generators
+
+The plugin uses these default generators from `src/utils.ts:68-83`:
+
+### Token Type
+
+Generates a 24-character ID using Better Auth's `generateId` function.
+
+```ts
+invite({
+  defaultTokenType: 'token'
+})
+```
+
+**Example output:** `a1b2c3d4e5f6g7h8i9j0k1l2`
+
+### Code Type
+
+Generates a 6-character alphanumeric code using uppercase letters and numbers.
+
+```ts
+invite({
+  defaultTokenType: 'code'
+})
+```
+
+**Example output:** `A1B2C3`
+
+**Implementation:**
+```ts
+generateRandomString(6, "0-9", "A-Z")
+```
+
+## Custom Token Implementation
+
+To implement custom token generation, set `defaultTokenType` to `'custom'` and provide a `generateToken` function.
+
+### Basic Example
+
+```ts
+import { invite } from '@better-auth/invite';
+
+export const auth = betterAuth({
+  plugins: [
+    invite({
+      defaultTokenType: 'custom',
+      generateToken: () => {
+        return crypto.randomUUID();
+      }
+    })
+  ]
+});
+```
+
+### UUID Tokens
+
+Generate RFC 4122 compliant UUIDs:
+
+```ts
+invite({
+  defaultTokenType: 'custom',
+  generateToken: () => {
+    return crypto.randomUUID();
+  }
+})
+```
+
+**Example output:** `550e8400-e29b-41d4-a716-446655440000`
+
+### Nanoid Tokens
+
+Use nanoid for short, URL-safe tokens:
+
+```ts
+import { nanoid } from 'nanoid';
+
+invite({
+  defaultTokenType: 'custom',
+  generateToken: () => {
+    return nanoid(16);
+  }
+})
+```
+
+**Example output:** `V1StGXR8_Z5jdHi6`
+
+### Prefixed Tokens
+
+Add prefixes to identify token types:
+
+```ts
+import { generateId } from 'better-auth';
+
+invite({
+  defaultTokenType: 'custom',
+  generateToken: () => {
+    return `inv_${generateId(20)}`;
+  }
+})
+```
+
+**Example output:** `inv_a1b2c3d4e5f6g7h8i9j0`
+
+### Timestamp-based Tokens
+
+Include timestamps in your tokens:
+
+```ts
+import { generateId } from 'better-auth';
+
+invite({
+  defaultTokenType: 'custom',
+  generateToken: () => {
+    const timestamp = Date.now().toString(36);
+    const random = generateId(12);
+    return `${timestamp}_${random}`;
+  }
+})
+```
+
+**Example output:** `lm3x9g_a1b2c3d4e5f6`
+
+## Token Resolution
+
+The `resolveTokenGenerator` function from `src/utils.ts:68-83` determines which generator to use:
+
+```ts
+export const resolveTokenGenerator = (
+  tokenType: TokensType,
+  options: NewInviteOptions,
+): (() => string) => {
+  if (tokenType === 'custom' && options.generateToken) {
+    return options.generateToken;
+  }
+
+  const tokenGenerators: Record<TokensType, () => string> = {
+    code: () => generateRandomString(6, "0-9", "A-Z"),
+    token: () => generateId(24),
+    custom: () => generateId(24), // secure fallback
+  };
+
+  return tokenGenerators[tokenType];
+};
+```
+
+<Note>
+If you set `defaultTokenType: 'custom'` without providing `generateToken`, the system falls back to the default token generator for security.
+</Note>
+
+## Per-Invite Token Types
+
+You can override the default token type when creating individual invites:
+
+```ts
+const { data } = await authClient.invite.create({
+  email: 'user@example.com',
+  role: 'member',
+  tokenType: 'code' // Override default
+});
+```
+
+This allows mixing token types in the same application.
+
+## Security Considerations
+
+### Token Uniqueness
+
+Ensure your custom generator produces unique tokens. The database schema enforces uniqueness at `src/schema.ts:6`:
+
+```ts
+token: { type: "string", unique: true }
+```
+
+### Token Length
+
+Generate tokens with sufficient entropy:
+
+<Warning>
+Tokens shorter than 16 characters may be vulnerable to brute force attacks.
+</Warning>
+
+**Recommended minimum:**
+- Random tokens: 20-24 characters
+- UUIDs: Use standard format (36 characters with hyphens)
+- Codes: 6-8 characters (uppercase alphanumeric)
+
+### Cryptographic Security
+
+Use cryptographically secure random number generators:
+
+<CodeGroup>
+```ts Good
+import { generateId } from 'better-auth';
+import { generateRandomString } from 'better-auth/crypto';
+import { nanoid } from 'nanoid';
+
+// All of these are cryptographically secure
+generateId(24);
+generateRandomString(6, "0-9", "A-Z");
+nanoid(16);
+crypto.randomUUID();
+```
+
+```ts Bad
+// DO NOT USE: Not cryptographically secure
+Math.random().toString(36).substring(2, 15);
+```
+</CodeGroup>
+
+### Token Expiration
+
+Custom tokens follow the same expiration rules defined in your configuration:
+
+```ts
+invite({
+  defaultTokenType: 'custom',
+  generateToken: () => crypto.randomUUID(),
+  invitationTokenExpiresIn: 60 * 60 // 1 hour
+})
+```
+
+<Note>
+See [Security](/advanced/security) for more details on token expiration and security features.
+</Note>
+
+## Advanced Patterns
+
+### Context-Aware Tokens
+
+While the `generateToken` function doesn't receive parameters, you can use closures to access context:
+
+```ts
+let currentRole: string | null = null;
+
+invite({
+  defaultTokenType: 'custom',
+  generateToken: () => {
+    const prefix = currentRole ? currentRole.substring(0, 3) : 'inv';
+    return `${prefix}_${generateId(20)}`;
+  },
+  inviteHooks: {
+    beforeCreateInvite: async ({ ctx }) => {
+      // This is a workaround - the API doesn't pass role to generateToken
+      // currentRole = inviteData.role;
+    }
+  }
+})
+```
+
+<Warning>
+This pattern has limitations since `generateToken` doesn't receive invite data. Use with caution.
+</Warning>
+
+### Database-Backed Tokens
+
+Generate tokens that check for uniqueness:
+
+```ts
+import { nanoid } from 'nanoid';
+
+invite({
+  defaultTokenType: 'custom',
+  generateToken: () => {
+    // Generate token
+    // Note: The plugin will handle database uniqueness constraint
+    return nanoid(16);
+  }
+})
+```
+
+The database unique constraint at `src/schema.ts:6` ensures no duplicate tokens exist.
+
+## Testing Custom Tokens
+
+Test your custom token generator:
+
+```ts
+import { describe, it, expect } from 'vitest';
+
+const generateToken = () => {
+  return crypto.randomUUID();
+};
+
+describe('Custom token generator', () => {
+  it('generates unique tokens', () => {
+    const token1 = generateToken();
+    const token2 = generateToken();
+    
+    expect(token1).not.toBe(token2);
+  });
+  
+  it('generates tokens with correct format', () => {
+    const token = generateToken();
+    
+    // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    expect(token).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+  
+  it('generates tokens with sufficient length', () => {
+    const token = generateToken();
+    
+    expect(token.length).toBeGreaterThanOrEqual(16);
+  });
+});
+```

@@ -1,0 +1,397 @@
+---
+title: Activating invites
+description: Handle the invitation activation and acceptance flow
+---
+
+## Overview
+
+There are two ways users can activate invitations:
+
+1. **Direct activation** - Programmatically activate using the token (API endpoint)
+2. **Callback flow** - User clicks email link and is redirected through activation
+
+## Direct activation
+
+Use the activate endpoint when you have the invite token and want to handle the flow programmatically:
+
+```ts
+const result = await authClient.invite.activate({
+  token: "invitation-token",
+  callbackURL: "/dashboard",
+});
+```
+
+### Response types
+
+The activation endpoint returns different responses based on user state:
+
+<Tabs>
+  <Tab title="User is logged in">
+    ```json
+    {
+      "status": true,
+      "message": "Invite activated successfully",
+      "redirectTo": "/dashboard" // from redirectToAfterUpgrade
+    }
+    ```
+
+    The invitation is immediately accepted and the user's role is updated.
+  </Tab>
+  <Tab title="User needs to sign in/up">
+    ```json
+    {
+      "status": true,
+      "message": "Please sign in or sign up to continue.",
+      "action": "SIGN_IN_UP_REQUIRED",
+      "redirectTo": "/auth/sign-in" // or sign-up for new users
+    }
+    ```
+
+    The token is stored in a cookie. After sign-in/up, the invite is automatically accepted.
+  </Tab>
+</Tabs>
+
+### Handling activation flow
+
+```ts
+try {
+  const result = await authClient.invite.activate({
+    token: inviteToken,
+    callbackURL: "/dashboard",
+  });
+
+  if (result.action === "SIGN_IN_UP_REQUIRED") {
+    // User needs to authenticate first
+    window.location.href = result.redirectTo;
+  } else {
+    // Invite accepted, user role updated
+    window.location.href = result.redirectTo;
+  }
+} catch (error) {
+  if (error.errorCode === "INVALID_TOKEN") {
+    alert("This invitation link is invalid or has expired");
+  }
+}
+```
+
+## Callback flow (email links)
+
+When users click invitation links from emails, they use the callback endpoint which handles redirects automatically.
+
+### Link format
+
+Invitation URLs follow this pattern:
+
+```
+https://yourapp.com/api/auth/invite/{token}?callbackURL={url}
+```
+
+Example:
+```
+https://yourapp.com/api/auth/invite/abc123xyz?callbackURL=https%3A%2F%2Fyourapp.com%2Fdashboard
+```
+
+### Callback flow steps
+
+<Steps>
+
+### User clicks invitation link
+
+The link opens in their browser and hits the `/api/auth/invite/{token}` endpoint.
+
+### Plugin validates the token
+
+- Checks if token exists and is not expired
+- Verifies token hasn't exceeded max uses
+- For private invites, checks email matches (if user is logged in)
+
+### Plugin checks authentication
+
+**If user is logged in:**
+- Invite is immediately accepted
+- User role is updated in the database
+- User is redirected to `redirectToAfterUpgrade` (if configured) or `callbackURL`
+
+**If user is not logged in:**
+- Token is stored in a secure cookie
+- User is redirected to sign-in or sign-up page
+- After authentication, a hook automatically accepts the invite
+
+### User authenticates (if needed)
+
+User completes sign-in or sign-up flow.
+
+### Invite is automatically accepted
+
+A hook (`invitesHooks`) detects the invite cookie and:
+- Updates the user's role
+- Records the invite usage
+- Deletes the invite cookie
+- Redirects to the appropriate page
+
+</Steps>
+
+### Error handling in callback flow
+
+If an error occurs during the callback flow, the user is redirected to the `callbackURL` with error parameters:
+
+```
+https://yourapp.com/dashboard?error=INVALID_TOKEN&message=Invalid+or+expired+invite+code
+```
+
+Handle these errors in your page:
+
+```tsx
+import { useSearchParams } from "next/navigation";
+
+function DashboardPage() {
+  const searchParams = useSearchParams();
+  const error = searchParams.get("error");
+  const message = searchParams.get("message");
+
+  if (error) {
+    return (
+      <div>
+        <h1>Invitation Error</h1>
+        <p>{message || "An error occurred while processing your invitation."}</p>
+      </div>
+    );
+  }
+
+  return <div>Welcome to your dashboard!</div>;
+}
+```
+
+## Authentication hooks
+
+The plugin hooks into Better Auth's authentication flow to automatically accept invites:
+
+### Supported authentication methods
+
+Invites are automatically activated after:
+
+- Email/password sign-up (`/sign-up/email`)
+- Email/password sign-in (`/sign-in/email`)
+- Email OTP sign-in (`/sign-in/email-otp`)
+- Social login callback (`/callback/:id`)
+- Email verification (`/verify-email`)
+
+The hook runs **after** these endpoints and checks for the invite cookie.
+
+### Hook behavior
+
+```ts
+// From hooks.ts - automatically executed by Better Auth
+export const invitesHooks = (options: NewInviteOptions) => {
+  return {
+    after: [
+      {
+        matcher: (context) =>
+          context.path === "/sign-up/email" ||
+          context.path === "/sign-in/email" ||
+          // ... other paths
+        handler: async (ctx) => {
+          // Get invite token from cookie
+          const inviteToken = await ctx.getSignedCookie("invite_token");
+          
+          if (!inviteToken) return;
+          
+          // Validate and accept invite
+          // Update user role
+          // Clean up cookie
+        },
+      },
+    ],
+  };
+};
+```
+
+## Private vs public invites
+
+### Private invite activation
+
+Private invites (with email) have additional validation:
+
+```ts
+const invitation = {
+  email: "user@example.com",
+  role: "admin",
+  newAccount: true,
+};
+
+// For new users:
+// - Must sign up with matching email
+// - Token in cookie is validated after sign-up
+// - Role is assigned after account creation
+
+// For existing users:
+// - Must sign in with matching email
+// - Role is upgraded after sign-in
+```
+
+### Public invite activation
+
+Public invites (no email) can be used by anyone:
+
+```ts
+const invitation = {
+  role: "member",
+  maxUses: 10,
+};
+
+// Anyone with the token can:
+// - Sign up with any email
+// - Sign in with their account
+// - Get assigned the role
+// - Multiple people can use the same token (up to maxUses)
+```
+
+## Example: Custom activation page
+
+```tsx
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
+
+export default function ActivateInvite() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [status, setStatus] = useState<"loading" | "error" | "success">("loading");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const token = searchParams.get("token");
+    const callbackURL = searchParams.get("callbackURL") || "/dashboard";
+
+    if (!token) {
+      setStatus("error");
+      setMessage("No invitation token provided");
+      return;
+    }
+
+    activateInvite(token, callbackURL);
+  }, [searchParams]);
+
+  const activateInvite = async (token: string, callbackURL: string) => {
+    try {
+      const result = await authClient.invite.activate({
+        token,
+        callbackURL,
+      });
+
+      if (result.action === "SIGN_IN_UP_REQUIRED") {
+        setMessage("Redirecting to sign in...");
+        setTimeout(() => router.push(result.redirectTo), 1000);
+      } else {
+        setStatus("success");
+        setMessage("Invitation accepted! Redirecting...");
+        setTimeout(() => router.push(result.redirectTo), 1000);
+      }
+    } catch (error) {
+      setStatus("error");
+      setMessage(error.message || "Failed to activate invitation");
+    }
+  };
+
+  return (
+    <div className="activation-page">
+      {status === "loading" && <p>Activating your invitation...</p>}
+      {status === "success" && <p>{message}</p>}
+      {status === "error" && (
+        <div>
+          <h2>Activation Failed</h2>
+          <p>{message}</p>
+          <button onClick={() => router.push("/")}>Go Home</button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## Custom invite URLs
+
+You can customize the invitation URL format:
+
+```ts
+invite({
+  defaultCustomInviteUrl: "https://myapp.com/join?code={token}&next={callbackUrl}",
+})
+```
+
+Then build your own activation page that extracts the token and uses the activate endpoint:
+
+```tsx
+// /join page
+const code = searchParams.get("code");
+const next = searchParams.get("next");
+
+if (code) {
+  await authClient.invite.activate({
+    token: code,
+    callbackURL: next || "/dashboard",
+  });
+}
+```
+
+## Redirect after upgrade
+
+When a logged-in user accepts an invite, control where they go:
+
+### Server default
+
+```ts
+invite({
+  defaultRedirectAfterUpgrade: "/welcome?upgraded=true",
+})
+```
+
+### Per-invitation override
+
+```ts
+await authClient.invite.create({
+  email: "user@example.com",
+  role: "admin",
+  redirectToAfterUpgrade: "/admin/dashboard?new=true",
+});
+```
+
+### Using token in redirect
+
+```ts
+invite({
+  defaultRedirectAfterUpgrade: "/dashboard?token={token}",
+})
+
+// Redirects to: /dashboard?token=abc123xyz
+// Use this to show a welcome message or track invite source
+```
+
+## Cookie configuration
+
+The invite cookie stores the token during sign-up flow:
+
+```ts
+invite({
+  inviteCookieMaxAge: 10 * 60, // 10 minutes (default)
+})
+```
+
+<Note>
+  The cookie is automatically deleted after the invite is accepted or if it expires. Users must complete authentication within the cookie's max age.
+</Note>
+
+<Warning>
+  If a user takes too long to sign up (longer than `inviteCookieMaxAge`), the invite cookie will expire and they'll need a new invitation link.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Managing invites" icon="list" href="/guides/managing-invites">
+    Cancel, reject, and retrieve invitations
+  </Card>
+  <Card title="Hooks and callbacks" icon="webhook" href="/guides/hooks-and-callbacks">
+    Respond to invitation lifecycle events
+  </Card>
+</CardGroup>

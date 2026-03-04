@@ -1,0 +1,288 @@
+---
+title: Activate Invite
+description: POST /invite/activate - Activate an invitation token
+---
+
+## Endpoint
+
+```
+POST /invite/activate
+```
+
+Activate an invitation token. This endpoint validates the invitation, checks permissions, and either upgrades the current user's role or redirects them to sign in/sign up.
+
+## Authentication
+
+This endpoint supports optional authentication. It works for both:
+- Authenticated users (upgrades their role immediately)
+- Unauthenticated users (sets a cookie and redirects to sign in/up)
+
+## Request Body
+
+<ParamField path="token" type="string" required>
+  The invitation token to activate.
+  
+  ```json
+  "token": "abc123xyz789"
+  ```
+</ParamField>
+
+<ParamField path="callbackURL" type="string">
+  Where to redirect the user after signing in/up. Used when the user is not authenticated.
+  
+  ```json
+  "callbackURL": "/dashboard"
+  ```
+</ParamField>
+
+## Response
+
+### Success Response - User Logged In (200)
+
+When the user is already authenticated and their role is upgraded:
+
+<ResponseField name="status" type="boolean">
+  Always `true` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Confirmation message: `"Invite activated successfully"`
+</ResponseField>
+
+<ResponseField name="redirectTo" type="string">
+  URL to redirect the user to after role upgrade. Uses `redirectToAfterUpgrade` from the invitation or plugin options.
+</ResponseField>
+
+### Success Response - Sign In/Up Required (200)
+
+When the user is not authenticated:
+
+<ResponseField name="status" type="boolean">
+  Always `true` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Message: `"Please sign in or sign up to continue."`
+</ResponseField>
+
+<ResponseField name="action" type="string">
+  Action required: `"SIGN_IN_UP_REQUIRED"`
+</ResponseField>
+
+<ResponseField name="redirectTo" type="string">
+  URL to redirect the user to for signing in/up. Uses `callbackURL` from the request or `defaultRedirectToSignIn` from plugin options.
+</ResponseField>
+
+## Examples
+
+### Activate Invite (Logged In User)
+
+**Request:**
+
+```json
+POST /invite/activate
+Content-Type: application/json
+Cookie: better-auth.session_token=...
+
+{
+  "token": "abc123xyz789",
+  "callbackURL": "/dashboard"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "Invite activated successfully",
+  "redirectTo": "/dashboard"
+}
+```
+
+The user's role is immediately upgraded and they can continue using the application.
+
+### Activate Invite (Not Logged In)
+
+**Request:**
+
+```json
+POST /invite/activate
+Content-Type: application/json
+
+{
+  "token": "abc123xyz789",
+  "callbackURL": "/dashboard"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "Please sign in or sign up to continue.",
+  "action": "SIGN_IN_UP_REQUIRED",
+  "redirectTo": "/auth/sign-in"
+}
+```
+
+**Cookies Set:**
+
+```
+Set-Cookie: invite_token=abc123xyz789; Max-Age=600; HttpOnly; SameSite=Lax
+```
+
+The invitation token is stored in a cookie (valid for 10 minutes by default). After the user signs in/up, the token is automatically activated.
+
+### Activate Invite for New Account
+
+**Request:**
+
+```json
+POST /invite/activate
+Content-Type: application/json
+
+{
+  "token": "invite-code-123",
+  "callbackURL": "/welcome"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "Please sign in or sign up to continue.",
+  "action": "SIGN_IN_UP_REQUIRED",
+  "redirectTo": "/auth/sign-up"
+}
+```
+
+For invitations to new accounts (users without existing accounts), the `redirectTo` points to the sign-up page.
+
+## Error Responses
+
+### Invalid or Expired Token (400)
+
+```json
+{
+  "message": "Invalid or non-existent token",
+  "errorCode": "INVALID_TOKEN"
+}
+```
+
+Returned when:
+- Token doesn't exist in the database
+- Token has expired
+- Invitation has been canceled or rejected
+
+### Insufficient Permissions (400)
+
+```json
+{
+  "message": "You cannot accept this invite",
+  "errorCode": "CANT_ACCEPT_INVITE"
+}
+```
+
+Returned when:
+- User doesn't have permission based on `canAcceptInvite` option
+- For private invites: User's email doesn't match the invitation email
+
+### No Uses Left (400)
+
+```json
+{
+  "message": "No uses left for this invite",
+  "errorCode": "NO_USES_LEFT_FOR_INVITE"
+}
+```
+
+Returned when:
+- The invitation has reached its `maxUses` limit
+
+### Invalid Email (400)
+
+```json
+{
+  "message": "This token is for a specific email, this is not it",
+  "errorCode": "INVALID_EMAIL"
+}
+```
+
+Returned when:
+- The logged-in user's email doesn't match the private invitation's email
+
+## Behavior
+
+### For Authenticated Users
+
+1. Validates the invitation token
+2. Checks if token is expired or already used
+3. For private invites, verifies the user's email matches
+4. Checks `canAcceptInvite` permissions
+5. Updates the user's role in the database
+6. Records the invitation use
+7. Triggers `onInvitationUsed` callback
+8. Returns success with redirect URL
+
+### For Unauthenticated Users
+
+1. Validates the invitation token
+2. Checks if token is expired or already used
+3. Stores the token in a secure HTTP-only cookie
+4. Returns `SIGN_IN_UP_REQUIRED` action with redirect URL
+5. After user signs in/up, a callback endpoint automatically activates the invitation
+
+### Invitation Cookie
+
+When the user is not authenticated:
+- Cookie name: `invite_token`
+- Max age: `options.inviteCookieMaxAge` (default: 600 seconds / 10 minutes)
+- Attributes: `HttpOnly`, `SameSite=Lax`, `Secure` (in production)
+
+## Hooks
+
+The following hooks are triggered during this endpoint (when user is authenticated):
+
+- `beforeAcceptInvite`: Called before accepting the invitation
+- `afterAcceptInvite`: Called after the invitation is accepted successfully
+
+## Permissions
+
+Permission is checked using the `canAcceptInvite` option:
+
+```typescript
+// Function-based permission
+canAcceptInvite: async ({ invitedUser, newAccount }) => {
+  if (newAccount) {
+    return true; // Allow all new accounts
+  }
+  return invitedUser.emailVerified === true;
+}
+
+// Permission object
+canAcceptInvite: {
+  statement: "user:invite:accept",
+  permissions: ["member", "admin"]
+}
+```
+
+## Cleanup
+
+If `cleanupInvitesAfterMaxUses` is enabled and the invitation reaches its max uses, the invitation record is automatically deleted.
+
+## Source Code Reference
+
+Implementation: `src/routes/activate-invite.ts:10-123`
+
+Logic: `src/routes/activate-invite-logic.ts`
+
+## Related
+
+- [Create Invite](/api/endpoints/create-invite) - Create a new invitation
+- [Get Invite](/api/endpoints/get-invite) - Get invitation details
+- [InviteOptions](/api/options) - Plugin configuration options
+- [InviteType](/api/types/invite-type) - Invitation data structure

@@ -1,0 +1,343 @@
+---
+title: Simple Email Invitation
+description: Complete guide to implementing basic email invitation flow with Better Auth Invite Plugin
+---
+
+This example demonstrates a complete email invitation flow, from server setup to client implementation.
+
+## Overview
+
+In this example, you'll learn how to:
+- Configure the invite plugin with email sending
+- Create private invitations with email addresses
+- Handle invite activation on the client
+- Complete the sign-up flow with invite tokens
+
+## Server Setup
+
+<Steps>
+
+<Step title="Install Dependencies">
+
+```bash
+npm install better-auth-invite-plugin
+```
+
+</Step>
+
+<Step title="Configure Better Auth">
+
+Set up the invite plugin in your Better Auth configuration:
+
+```ts auth.ts
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth-invite-plugin";
+
+export const auth = betterAuth({
+  database: {
+    // Your database configuration
+  },
+  emailAndPassword: {
+    enabled: true,
+  },
+  plugins: [
+    invite({
+      // Email sending function (required for private invites)
+      async sendUserInvitation({ email, name, role, url, token, newAccount }) {
+        // Send email with the invitation link
+        await sendEmail({
+          to: email,
+          subject: newAccount 
+            ? `You're invited to join our platform!` 
+            : `Your role has been upgraded to ${role}`,
+          html: `
+            <h1>Hello ${name || 'there'}!</h1>
+            <p>${newAccount 
+              ? 'You have been invited to create an account.' 
+              : `Your role has been upgraded to ${role}.`
+            }</p>
+            <p><a href="${url}">Accept invitation</a></p>
+          `,
+        });
+      },
+      // Optional: Customize redirect after upgrade
+      defaultRedirectAfterUpgrade: "/dashboard/welcome",
+    }),
+  ],
+});
+
+export type Auth = typeof auth;
+```
+
+</Step>
+
+<Step title="Create Invite Endpoint">
+
+Create a server action or API route to handle invite creation:
+
+```ts app/actions/invite.ts
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+
+export async function createInvite(email: string, role: string) {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session) {
+    throw new Error("Unauthorized");
+  }
+
+  // Call the invite endpoint directly
+  const response = await auth.api.createInvite({
+    body: {
+      email,
+      role,
+    },
+    headers: await headers(),
+  });
+
+  return response;
+}
+```
+
+</Step>
+
+</Steps>
+
+## Client Setup
+
+<Steps>
+
+<Step title="Configure Client">
+
+Add the invite client plugin to your Better Auth client:
+
+```ts lib/auth-client.ts
+import { createAuthClient } from "better-auth/react";
+import { inviteClient } from "better-auth-invite-plugin/client";
+
+export const authClient = createAuthClient({
+  baseURL: process.env.NEXT_PUBLIC_AUTH_URL,
+  plugins: [inviteClient()],
+});
+```
+
+</Step>
+
+<Step title="Create Invitation Component">
+
+Build a UI component to send invitations:
+
+```tsx components/invite-form.tsx
+"use client";
+
+import { useState } from "react";
+import { authClient } from "@/lib/auth-client";
+
+export function InviteForm() {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("user");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await authClient.invite.create({
+        email,
+        role,
+      });
+
+      if (error) {
+        setMessage(`Error: ${error.message}`);
+      } else {
+        setMessage("Invitation sent successfully!");
+        setEmail("");
+      }
+    } catch (err) {
+      setMessage("Failed to send invitation");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label htmlFor="email" className="block text-sm font-medium">
+          Email Address
+        </label>
+        <input
+          id="email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+          placeholder="user@example.com"
+        />
+      </div>
+
+      <div>
+        <label htmlFor="role" className="block text-sm font-medium">
+          Role
+        </label>
+        <select
+          id="role"
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+        >
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50"
+      >
+        {loading ? "Sending..." : "Send Invitation"}
+      </button>
+
+      {message && (
+        <p className={message.includes("Error") ? "text-red-600" : "text-green-600"}>
+          {message}
+        </p>
+      )}
+    </form>
+  );
+}
+```
+
+</Step>
+
+<Step title="Handle Invite Activation">
+
+Create a page to handle invite link clicks:
+
+```tsx app/invite/[token]/page.tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
+
+export default function InvitePage({ params }: { params: { token: string } }) {
+  const router = useRouter();
+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const activateInvite = async () => {
+      try {
+        const { data, error } = await authClient.invite.activate({
+          token: params.token,
+          callbackURL: "/auth/sign-up",
+        });
+
+        if (error) {
+          setStatus("error");
+          setMessage(error.message || "Invalid or expired invitation");
+          return;
+        }
+
+        if (data) {
+          setStatus("success");
+          setMessage("Invitation activated! Redirecting...");
+          
+          // Redirect based on response
+          if (data.action === "SIGN_IN_UP_REQUIRED") {
+            setTimeout(() => {
+              router.push(data.redirectTo || "/auth/sign-up");
+            }, 1500);
+          } else if (data.redirectTo) {
+            setTimeout(() => {
+              router.push(data.redirectTo);
+            }, 1500);
+          }
+        }
+      } catch (err) {
+        setStatus("error");
+        setMessage("Failed to activate invitation");
+      }
+    };
+
+    activateInvite();
+  }, [params.token, router]);
+
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="text-center">
+        {status === "loading" && <p>Activating invitation...</p>}
+        {status === "success" && <p className="text-green-600">{message}</p>}
+        {status === "error" && <p className="text-red-600">{message}</p>}
+      </div>
+    </div>
+  );
+}
+```
+
+</Step>
+
+</Steps>
+
+## How It Works
+
+<Steps>
+
+<Step title="Admin Creates Invitation">
+
+When an admin creates an invitation with an email address:
+1. The `createInvite` endpoint generates a unique token
+2. The `sendUserInvitation` function is called
+3. An email with the invitation link is sent to the recipient
+4. The invitation is stored in the database with status "pending"
+
+</Step>
+
+<Step title="Recipient Receives Email">
+
+The recipient receives an email containing:
+- A personalized message
+- An activation link with the token: `/invite/{token}`
+- Information about their assigned role
+
+</Step>
+
+<Step title="Recipient Activates Invite">
+
+When the recipient clicks the link:
+1. The `activate` endpoint validates the token
+2. The token is stored in a secure cookie
+3. The user is redirected to sign-up or sign-in
+
+</Step>
+
+<Step title="Account Creation">
+
+During sign-up or sign-in:
+1. Better Auth checks for the invite cookie
+2. If valid, the user's role is automatically assigned
+3. The invite is marked as "used"
+4. The cookie is cleared
+5. The user is redirected to `defaultRedirectAfterUpgrade`
+
+</Step>
+
+</Steps>
+
+<Note>
+**Security Note**: Private invitations can only be used by the email address they were sent to. The plugin automatically validates that the signed-up email matches the invited email.
+</Note>
+
+## Next Steps
+
+- Learn about [role-based invites](/examples/role-based-invites)
+- Explore [custom email handlers](/examples/custom-email-handler)
+- Build an [invite dashboard](/examples/invite-dashboard)

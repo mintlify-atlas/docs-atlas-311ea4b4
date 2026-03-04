@@ -1,0 +1,407 @@
+---
+title: Invitation types
+description: Understanding private and public invitations in the Better Auth Invite Plugin
+---
+
+The Better Auth Invite Plugin supports two distinct types of invitations: **private invites** (email-based) and **public invites** (shareable codes). Each type serves different use cases and has unique characteristics.
+
+## Private invites
+
+Private invites are sent directly to a specific email address. They are ideal for inviting specific individuals to your application.
+
+### Creating a private invite
+
+To create a private invite, include an `email` field:
+
+```typescript
+const result = await client.invite.create({
+  email: "user@example.com",
+  role: "member",
+});
+
+// Returns: { status: true, message: "The invitation was sent" }
+```
+
+The plugin automatically sends an email to the specified address with the invitation link.
+
+Source: [src/routes/create-invite.ts:59-170](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+### Private invite characteristics
+
+<CardGroup cols={2}>
+  <Card title="Email validation" icon="envelope-circle-check">
+    Only the user with the matching email can accept the invitation
+  </Card>
+  <Card title="Single use default" icon="key">
+    Private invites default to `maxUses: 1`
+  </Card>
+  <Card title="Email required" icon="at">
+    Must configure `sendUserInvitation` in plugin options
+  </Card>
+  <Card title="New account detection" icon="user-plus">
+    Automatically detects if user exists or needs to sign up
+  </Card>
+</CardGroup>
+
+### Email validation enforcement
+
+When a user attempts to accept a private invite, the plugin validates their email:
+
+```typescript
+if (invitation.email && invitation.email !== invitedUser.email) {
+  throw error("INVALID_EMAIL", "This token is for a specific email");
+}
+```
+
+Source: [src/utils.ts:114-116](file:///home/daytona/workspace/source/src/utils.ts)
+
+### New account vs role upgrade
+
+Private invites automatically determine whether the recipient needs to create a new account:
+
+```typescript
+// Plugin checks if user exists
+const invitedUser = await adapter.findUserByEmail(email);
+const newAccount = !invitedUser;
+
+// Determines redirect URL
+const callbackURL = invitedUser 
+  ? redirectToSignIn   // Existing user: sign in to upgrade
+  : redirectToSignUp;  // New user: sign up with invite
+```
+
+This information is:
+- Stored in the `newAccount` field of the invitation
+- Passed to the `sendUserInvitation` function for email templates
+- Available in permission checks via `canAcceptInvite`
+
+Source: [src/routes/create-invite.ts:100-111](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+### Email configuration
+
+Private invites require an email function:
+
+```typescript
+import { betterAuth } from "better-auth";
+import { invite } from "better-auth-invite";
+
+export const auth = betterAuth({
+  plugins: [
+    invite({
+      sendUserInvitation: async (data, request) => {
+        const { email, name, role, url, token, newAccount } = data;
+        
+        const subject = newAccount
+          ? `You've been invited to join as ${role}`
+          : `Your role has been upgraded to ${role}`;
+        
+        await sendEmail({
+          to: email,
+          subject,
+          html: `
+            <p>Hello ${name || 'there'},</p>
+            <p>${subject}</p>
+            <a href="${url}">Accept invitation</a>
+          `,
+        });
+      },
+    }),
+  ],
+});
+```
+
+<Warning>
+If you attempt to create a private invite without configuring `sendUserInvitation`, the plugin will throw an error:
+
+```
+Invitation email is not enabled. Pass `sendUserInvitation` to the plugin options.
+```
+</Warning>
+
+Source: [src/routes/create-invite.ts:61-72](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+### Rejecting private invites
+
+Only the recipient can reject a private invite:
+
+```typescript
+// Only works if logged-in user's email matches invite email
+await client.invite.reject({
+  token: "invitation-token",
+});
+```
+
+Public invites cannot be rejected:
+
+```typescript
+const inviteType = invitation.email ? "private" : "public";
+
+if (inviteType === "public" || invitation.email !== inviteeUser.email) {
+  throw error("CANT_REJECT_INVITE");
+}
+```
+
+Source: [src/routes/reject-invite.ts:82-89](file:///home/daytona/workspace/source/src/routes/reject-invite.ts)
+
+## Public invites
+
+Public invites are shareable codes or links that anyone can use. They're perfect for open registration, beta access codes, or community invitations.
+
+### Creating a public invite
+
+To create a public invite, omit the `email` field:
+
+```typescript
+const result = await client.invite.create({
+  role: "member",
+  senderResponse: "token",  // or "url"
+});
+
+// Returns: { status: true, message: "abc123def456..." }
+// The message contains either the token or full URL
+```
+
+Source: [src/routes/create-invite.ts:172-190](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+### Public invite characteristics
+
+<CardGroup cols={2}>
+  <Card title="No email validation" icon="globe">
+    Anyone with the token can use the invitation
+  </Card>
+  <Card title="Multi-use default" icon="users">
+    Public invites default to unlimited uses
+  </Card>
+  <Card title="No email sent" icon="link">
+    You receive the token/URL and distribute it yourself
+  </Card>
+  <Card title="Cannot be rejected" icon="ban">
+    Public invites can only be canceled by the creator
+  </Card>
+</CardGroup>
+
+### Response format options
+
+You can control what the API returns when creating public invites:
+
+#### Token response
+
+```typescript
+const result = await client.invite.create({
+  role: "member",
+  senderResponse: "token",
+});
+
+console.log(result.message);
+// Output: "abc123def456ghi789jkl012"
+```
+
+#### URL response
+
+```typescript
+const result = await client.invite.create({
+  role: "member",
+  senderResponse: "url",
+});
+
+console.log(result.message);
+// Output: "https://yourapp.com/invite/abc123def456?callbackURL=/auth/sign-up"
+```
+
+Set a default in your plugin configuration:
+
+```typescript
+invite({
+  defaultSenderResponse: "url",  // "token" | "url"
+});
+```
+
+### Redirect destination
+
+For public invites, you control whether the URL redirects to sign-up or sign-in:
+
+```typescript
+const result = await client.invite.create({
+  role: "member",
+  senderResponse: "url",
+  senderResponseRedirect: "signUp",  // "signUp" | "signIn"
+});
+```
+
+This determines the `callbackURL` parameter in the generated URL:
+
+```typescript
+const redirectTo = senderResponseRedirect === "signUp"
+  ? redirectToSignUp   // Default: /auth/sign-up
+  : redirectToSignIn;  // Default: /auth/sign-in
+```
+
+Source: [src/routes/create-invite.ts:172-180](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+### Usage limits
+
+Public invites default to unlimited uses, but you can restrict them:
+
+```typescript
+const result = await client.invite.create({
+  role: "beta-tester",
+  maxUses: 100,  // Limit to 100 uses
+});
+```
+
+The plugin tracks each use in the `inviteUse` table:
+
+```typescript
+const timesUsed = await adapter.countInvitationUses(invitation.id);
+
+if (timesUsed >= invitation.maxUses) {
+  throw error("NO_USES_LEFT_FOR_INVITE");
+}
+```
+
+Source: [src/adapter.ts:90-99](file:///home/daytona/workspace/source/src/adapter.ts)
+
+### Public invite use cases
+
+<AccordionGroup>
+  <Accordion title="Open beta access">
+    ```typescript
+    // Create shareable beta code
+    const { message } = await client.invite.create({
+      role: "beta-user",
+      tokenType: "code",        // 6-character code
+      maxUses: 1000,
+      expiresIn: 30 * 24 * 60 * 60,  // 30 days
+    });
+    
+    // Share code: "A1B2C3"
+    ```
+  </Accordion>
+  
+  <Accordion title="Limited-time offers">
+    ```typescript
+    // Create time-limited premium access
+    const { message } = await client.invite.create({
+      role: "premium",
+      maxUses: 50,
+      expiresIn: 7 * 24 * 60 * 60,  // 7 days
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Team onboarding">
+    ```typescript
+    // Create reusable team invite link
+    const { message } = await client.invite.create({
+      role: "team-member",
+      senderResponse: "url",
+      redirectToAfterUpgrade: "/team/welcome",
+    });
+    
+    // Share URL with new team members
+    ```
+  </Accordion>
+  
+  <Accordion title="Event registration">
+    ```typescript
+    // Create single-use event codes
+    const codes = await Promise.all(
+      Array.from({ length: 100 }, async () => {
+        const { message } = await client.invite.create({
+          role: "attendee",
+          tokenType: "code",
+          maxUses: 1,
+        });
+        return message;
+      })
+    );
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Configuration differences
+
+Here's how configuration options differ between invite types:
+
+| Option | Private Invites | Public Invites |
+|--------|----------------|----------------|
+| `email` | Required | Omit |
+| `maxUses` | Default: `1` | Default: `Infinity` |
+| `sendUserInvitation` | Required | Not used |
+| `senderResponse` | Ignored | Returns token or URL |
+| `senderResponseRedirect` | Ignored | Controls callback URL |
+| `newAccount` | Auto-detected | Not set |
+| Can be rejected | Yes (by recipient) | No |
+| Email validation | Yes | No |
+
+Source: [src/routes/create-invite.ts:59](file:///home/daytona/workspace/source/src/routes/create-invite.ts) and [src/adapter.ts:33-36](file:///home/daytona/workspace/source/src/adapter.ts)
+
+## Hybrid approach
+
+You can create private invites with multiple uses:
+
+```typescript
+const result = await client.invite.create({
+  email: "user@example.com",
+  role: "member",
+  maxUses: 3,  // Can be used 3 times
+});
+```
+
+This allows the recipient to:
+- Accept the invite on multiple devices
+- Recover if the first attempt fails
+- Share with the same email on different accounts (if your auth system allows)
+
+<Note>
+Email validation still applies - only users with the matching email can use the invitation, but they can use it up to `maxUses` times.
+</Note>
+
+## Type determination
+
+The plugin determines invite type based on the presence of an email:
+
+```typescript
+const inviteType = email ? "private" : "public";
+
+if (inviteType === "private") {
+  // Send email
+  await options.sendUserInvitation({ email, role, url, token, newAccount });
+  return { status: true, message: "The invitation was sent" };
+}
+
+if (inviteType === "public") {
+  // Return token or URL
+  const returnToken = senderResponse === "token" ? token : url;
+  return { status: true, message: returnToken };
+}
+```
+
+Source: [src/routes/create-invite.ts:59-190](file:///home/daytona/workspace/source/src/routes/create-invite.ts)
+
+## Getting invite information
+
+The behavior of the `getInvite` endpoint differs by type:
+
+### Private invites
+
+```typescript
+// Must be logged in with matching email
+await client.invite.get({ token });
+
+// Validates:
+if (invitation.email && invitation.email !== sessionUser.email) {
+  throw error("INVALID_TOKEN");
+}
+```
+
+### Public invites
+
+```typescript
+// Can be accessed by anyone (no session required)
+await client.invite.get({ token });
+
+// No email validation
+```
+
+Source: [src/routes/get-invite.ts:99-104](file:///home/daytona/workspace/source/src/routes/get-invite.ts)

@@ -1,0 +1,326 @@
+---
+title: Reject Invite
+description: POST /invite/reject - Reject an invitation
+---
+
+## Endpoint
+
+```
+POST /invite/reject
+```
+
+Reject an invitation. Only available for private invites (with email). Only the invitee (user whose email matches the invitation) can reject it.
+
+## Authentication
+
+This endpoint requires authentication. User must be logged in with a valid session, and their email must match the invitation email.
+
+## Request Body
+
+<ParamField path="token" type="string" required>
+  The invitation token to reject.
+  
+  ```json
+  "token": "abc123xyz789"
+  ```
+</ParamField>
+
+## Response
+
+### Success Response (200)
+
+<ResponseField name="status" type="boolean">
+  Always `true` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Confirmation message: `"Invite rejected successfully"`
+</ResponseField>
+
+## Examples
+
+### Reject Private Invitation
+
+**Request:**
+
+```json
+POST /invite/reject
+Content-Type: application/json
+Cookie: better-auth.session_token=...
+
+{
+  "token": "abc123xyz789"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "Invite rejected successfully"
+}
+```
+
+The invitation is marked as "rejected" (or deleted if `cleanupInvitesOnDecision` is enabled).
+
+### Reject with Cleanup Enabled
+
+When `cleanupInvitesOnDecision: true` is configured:
+
+**Request:**
+
+```json
+POST /invite/reject
+Content-Type: application/json
+Cookie: better-auth.session_token=...
+
+{
+  "token": "invite-to-delete"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "Invite rejected successfully"
+}
+```
+
+The invitation record is permanently deleted from the database along with all associated invite uses.
+
+## Error Responses
+
+### Invalid Token (400)
+
+```json
+{
+  "message": "Invalid or non-existent token",
+  "errorCode": "INVALID_TOKEN"
+}
+```
+
+Returned when:
+- Token doesn't exist in the database
+- Invitation has already been canceled, rejected, or used
+- Invitation has expired
+
+### Cannot Reject Invite (400)
+
+```json
+{
+  "message": "You cannot reject this invite",
+  "errorCode": "CANT_REJECT_INVITE"
+}
+```
+
+Returned when:
+- The invitation is a public invite (no email)
+- The logged-in user's email doesn't match the invitation email
+- User doesn't have permission based on `canRejectInvite` option
+
+## Behavior
+
+### Rejection Process
+
+1. Validates the invitation token exists
+2. Verifies this is a private invite (has an email)
+3. Checks the logged-in user's email matches the invitation email
+4. Checks the invitation status is "pending"
+5. Checks `canRejectInvite` permissions
+6. Triggers `beforeRejectInvite` hook
+7. Either deletes or updates the invitation based on `cleanupInvitesOnDecision` setting:
+   - If `cleanupInvitesOnDecision: true`: Deletes invitation and all invite uses
+   - If `cleanupInvitesOnDecision: false` (default): Updates status to "rejected"
+8. Triggers `afterRejectInvite` hook
+9. Returns success confirmation
+
+### Authorization Rules
+
+**Always enforced:**
+- Only works for private invites (with email)
+- User's email must match the invitation email
+
+**Configurable via `canRejectInvite`:**
+- Additional custom permission checks
+- Role-based restrictions
+
+## Cleanup Behavior
+
+### With `cleanupInvitesOnDecision: false` (default)
+
+```typescript
+// Invitation status is updated
+{
+  id: "inv_123",
+  token: "abc123xyz789",
+  status: "rejected", // Updated from "pending"
+  email: "user@example.com",
+  // ... other fields
+}
+```
+
+The invitation remains in the database for audit purposes but cannot be used.
+
+### With `cleanupInvitesOnDecision: true`
+
+```typescript
+// Invitation is deleted
+// DELETE FROM invite WHERE token = 'abc123xyz789'
+// DELETE FROM inviteUse WHERE inviteId = 'inv_123'
+```
+
+The invitation and all associated records are permanently removed.
+
+## Hooks
+
+The following hooks are triggered during this endpoint:
+
+- `beforeRejectInvite`: Called before rejecting the invitation
+  ```typescript
+  beforeRejectInvite: async ({ ctx, invitation }) => {
+    // Log rejection attempt
+    console.log(`User rejecting invite ${invitation.id}`);
+  }
+  ```
+
+- `afterRejectInvite`: Called after the invitation is rejected
+  ```typescript
+  afterRejectInvite: async ({ ctx, invitation }) => {
+    // Notify the inviter
+    const inviter = await getUser(invitation.createdByUserId);
+    await sendEmail({
+      to: inviter.email,
+      subject: 'Invitation Rejected',
+      body: `${invitation.email} has rejected your invitation to ${invitation.role}.`,
+    });
+  }
+  ```
+
+## Permissions
+
+Permission is checked using the `canRejectInvite` option:
+
+```typescript
+// Function-based permission
+canRejectInvite: async ({ inviteeUser, invitation, ctx }) => {
+  // Allow all invitees to reject
+  return true;
+}
+
+// Permission object
+canRejectInvite: {
+  statement: "user:invite:reject",
+  permissions: ["member", "admin"]
+}
+
+// Always allow (default)
+canRejectInvite: true
+```
+
+**Note:** Even with `canRejectInvite: true`, the user's email must match the invitation email.
+
+## Use Cases
+
+### Decline Unwanted Invitation
+
+```typescript
+// User decides not to accept a role
+const result = await authClient.invite.rejectInvite({
+  token: invitationToken,
+});
+
+if (result.status) {
+  alert('You have declined the invitation');
+}
+```
+
+### Reject and Notify
+
+```typescript
+// Reject with custom notification logic
+try {
+  await authClient.invite.rejectInvite({ token: inviteToken });
+  
+  // Show confirmation to user
+  showNotification('You have declined the invitation to become an admin');
+  
+  // Redirect to home
+  router.push('/');
+} catch (error) {
+  if (error.errorCode === 'CANT_REJECT_INVITE') {
+    showError('You are not authorized to reject this invitation');
+  }
+}
+```
+
+### Handle Rejection in UI
+
+```jsx
+const InvitationCard = ({ token }) => {
+  const [loading, setLoading] = useState(false);
+  
+  const handleReject = async () => {
+    setLoading(true);
+    try {
+      await authClient.invite.rejectInvite({ token });
+      alert('Invitation rejected');
+    } catch (error) {
+      alert('Failed to reject invitation');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  return (
+    <div>
+      <button onClick={handleReject} disabled={loading}>
+        Decline Invitation
+      </button>
+    </div>
+  );
+};
+```
+
+## Differences from Cancel
+
+| Feature | Cancel | Reject |
+|---------|--------|--------|
+| Who can do it | Invitation creator | Invitation recipient |
+| Invite type | Both public and private | Private invites only |
+| Authorization | `canCancelInvite` | `canRejectInvite` |
+| Use case | Revoke invitation before acceptance | Decline invitation as recipient |
+| Status | `canceled` | `rejected` |
+
+## Invitation Status Flow
+
+```
+pending → rejected (via rejectInvite)
+pending → canceled (via cancelInvite)
+pending → used (via activateInvite)
+```
+
+Once an invitation is rejected, it cannot be activated or canceled.
+
+## Public vs. Private Invites
+
+**Private invites** (with email):
+- Can be rejected by the invitee
+- Requires email match for rejection
+
+**Public invites** (no email):
+- Cannot be rejected (no specific recipient)
+- Can only be canceled by creator
+
+## Source Code Reference
+
+Implementation: `src/routes/reject-invite.ts:9-135`
+
+## Related
+
+- [Create Invite](/api/endpoints/create-invite) - Create a new invitation
+- [Cancel Invite](/api/endpoints/cancel-invite) - Cancel an invitation (by creator)
+- [Activate Invite](/api/endpoints/activate-invite) - Accept an invitation
+- [InviteOptions](/api/options) - Plugin configuration options

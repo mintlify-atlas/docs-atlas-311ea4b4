@@ -1,0 +1,282 @@
+---
+title: Cancel Invite
+description: POST /invite/cancel - Cancel a pending invitation
+---
+
+## Endpoint
+
+```
+POST /invite/cancel
+```
+
+Cancel a pending invitation. Only the user who created the invitation can cancel it.
+
+## Authentication
+
+This endpoint requires authentication. User must be logged in with a valid session.
+
+## Request Body
+
+<ParamField path="token" type="string" required>
+  The invitation token to cancel.
+  
+  ```json
+  "token": "abc123xyz789"
+  ```
+</ParamField>
+
+## Response
+
+### Success Response (200)
+
+<ResponseField name="status" type="boolean">
+  Always `true` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Confirmation message: `"Invite cancelled successfully"`
+</ResponseField>
+
+## Examples
+
+### Cancel Pending Invitation
+
+**Request:**
+
+```json
+POST /invite/cancel
+Content-Type: application/json
+Cookie: better-auth.session_token=...
+
+{
+  "token": "abc123xyz789"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "Invite cancelled successfully"
+}
+```
+
+The invitation is marked as "canceled" (or deleted if `cleanupInvitesOnDecision` is enabled).
+
+### Cancel with Cleanup Enabled
+
+When `cleanupInvitesOnDecision: true` is configured:
+
+**Request:**
+
+```json
+POST /invite/cancel
+Content-Type: application/json
+Cookie: better-auth.session_token=...
+
+{
+  "token": "invite-to-delete"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "Invite cancelled successfully"
+}
+```
+
+The invitation record is permanently deleted from the database along with all associated invite uses.
+
+## Error Responses
+
+### Invalid Token (400)
+
+```json
+{
+  "message": "Invalid or non-existent token",
+  "errorCode": "INVALID_TOKEN"
+}
+```
+
+Returned when:
+- Token doesn't exist in the database
+- Invitation has already been canceled, rejected, or used
+- Invitation has expired
+
+### Insufficient Permissions (400)
+
+```json
+{
+  "message": "User does not have sufficient permissions to create invite",
+  "errorCode": "INSUFFICIENT_PERMISSIONS"
+}
+```
+
+Returned when:
+- The logged-in user is not the creator of the invitation
+- User doesn't have permission based on `canCancelInvite` option
+
+## Behavior
+
+### Cancellation Process
+
+1. Validates the invitation token exists
+2. Verifies the logged-in user created this invitation
+3. Checks the invitation status is "pending"
+4. Checks `canCancelInvite` permissions
+5. Triggers `beforeCancelInvite` hook
+6. Either deletes or updates the invitation based on `cleanupInvitesOnDecision` setting:
+   - If `cleanupInvitesOnDecision: true`: Deletes invitation and all invite uses
+   - If `cleanupInvitesOnDecision: false` (default): Updates status to "canceled"
+7. Triggers `afterCancelInvite` hook
+8. Returns success confirmation
+
+### Authorization Rules
+
+**Always enforced:**
+- Only the user who created the invitation can cancel it (checked via `createdByUserId`)
+
+**Configurable via `canCancelInvite`:**
+- Additional custom permission checks
+- Role-based restrictions
+
+## Cleanup Behavior
+
+### With `cleanupInvitesOnDecision: false` (default)
+
+```typescript
+// Invitation status is updated
+{
+  id: "inv_123",
+  token: "abc123xyz789",
+  status: "canceled", // Updated from "pending"
+  // ... other fields
+}
+```
+
+The invitation remains in the database for audit purposes but cannot be used.
+
+### With `cleanupInvitesOnDecision: true`
+
+```typescript
+// Invitation is deleted
+// DELETE FROM invite WHERE token = 'abc123xyz789'
+// DELETE FROM inviteUse WHERE inviteId = 'inv_123'
+```
+
+The invitation and all associated records are permanently removed.
+
+## Hooks
+
+The following hooks are triggered during this endpoint:
+
+- `beforeCancelInvite`: Called before canceling the invitation
+  ```typescript
+  beforeCancelInvite: async ({ ctx, invitation }) => {
+    // Log cancellation attempt
+    console.log(`Canceling invite ${invitation.id}`);
+  }
+  ```
+
+- `afterCancelInvite`: Called after the invitation is canceled
+  ```typescript
+  afterCancelInvite: async ({ ctx, invitation }) => {
+    // Notify the invitee (if applicable)
+    if (invitation.email) {
+      await sendEmail({
+        to: invitation.email,
+        subject: 'Invitation Cancelled',
+        body: `The invitation to ${invitation.role} has been cancelled.`,
+      });
+    }
+  }
+  ```
+
+## Permissions
+
+Permission is checked using the `canCancelInvite` option:
+
+```typescript
+// Function-based permission
+canCancelInvite: async ({ inviterUser, invitation, ctx }) => {
+  // Only admins can cancel invitations
+  return inviterUser.role === 'admin';
+}
+
+// Permission object
+canCancelInvite: {
+  statement: "user:invite:cancel",
+  permissions: ["admin"]
+}
+
+// Always allow (default)
+canCancelInvite: true
+```
+
+**Note:** Even with `canCancelInvite: true`, the user must still be the creator of the invitation.
+
+## Use Cases
+
+### Cancel Unused Invitations
+
+```typescript
+// Cancel an invitation that's no longer needed
+const result = await authClient.invite.cancelInvite({
+  token: unusedInviteToken,
+});
+
+if (result.status) {
+  console.log('Invitation cancelled successfully');
+}
+```
+
+### Cancel Before Creating New Invitation
+
+```typescript
+// Cancel old invitation before sending a new one
+await authClient.invite.cancelInvite({ token: oldToken });
+
+const newInvite = await authClient.invite.createInvite({
+  email: 'user@example.com',
+  role: 'admin',
+});
+```
+
+### Revoke Access
+
+```typescript
+// Revoke an invitation before it's accepted
+try {
+  await authClient.invite.cancelInvite({ token: inviteToken });
+  alert('Invitation has been revoked');
+} catch (error) {
+  if (error.errorCode === 'INVALID_TOKEN') {
+    alert('Invitation has already been used or cancelled');
+  }
+}
+```
+
+## Invitation Status Flow
+
+```
+pending → canceled (via cancelInvite)
+pending → rejected (via rejectInvite)
+pending → used (via activateInvite)
+```
+
+Once an invitation is canceled, it cannot be activated or rejected.
+
+## Source Code Reference
+
+Implementation: `src/routes/cancel-invite.ts:9-133`
+
+## Related
+
+- [Create Invite](/api/endpoints/create-invite) - Create a new invitation
+- [Reject Invite](/api/endpoints/reject-invite) - Reject an invitation (by invitee)
+- [Get Invite](/api/endpoints/get-invite) - Get invitation details
+- [InviteOptions](/api/options) - Plugin configuration options

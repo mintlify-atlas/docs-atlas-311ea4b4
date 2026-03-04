@@ -1,0 +1,128 @@
+---
+title: Installation
+description: Install and configure the Better Auth Invite Plugin in your project
+---
+
+## Prerequisites
+
+<Warning>
+  The Better Auth Invite Plugin requires **Better Auth v1.4.13 or newer**.
+</Warning>
+
+Before installing the plugin, ensure you have:
+
+- Better Auth v1.4.13+ installed in your project
+- A configured database adapter (PostgreSQL, MySQL, SQLite, etc.)
+- Node.js 16.x or higher
+
+## Install the package
+
+Install the plugin using your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install better-auth-invite-plugin
+```
+
+```bash pnpm
+pnpm add better-auth-invite-plugin
+```
+
+```bash yarn
+yarn add better-auth-invite-plugin
+```
+
+```bash bun
+bun add better-auth-invite-plugin
+```
+
+</CodeGroup>
+
+## Peer dependencies
+
+The plugin has the following peer dependencies that should already be installed if you're using Better Auth:
+
+- `better-auth` ^1.4.13
+
+The plugin also includes these runtime dependencies (installed automatically):
+
+- `@better-auth/utils` ^0.3.0
+- `zod` ^4.3.5
+
+## Database setup
+
+After installing the plugin, you need to update your database schema to include the invite tables.
+
+### Automatic migration
+
+<Info>
+  Better Auth can automatically generate and run migrations for plugin schemas.
+</Info>
+
+The plugin adds two tables to your database:
+
+1. **invite**: Stores invitation records
+2. **inviteUse**: Tracks when and by whom invites are used
+
+To apply the schema changes, run Better Auth's migration command:
+
+```bash
+npx better-auth migrate
+```
+
+This will detect the new plugin schema and create the necessary database tables.
+
+### Manual schema creation
+
+If you prefer to manage database migrations manually, here's the schema structure:
+
+**invite table**:
+- `id` - Primary key (string)
+- `token` - Unique string for the invitation
+- `createdAt` - Timestamp when invite was created
+- `expiresAt` - Timestamp when invite expires
+- `maxUses` - Number representing maximum uses
+- `createdByUserId` - Foreign key to user table
+- `redirectToAfterUpgrade` - Optional string for custom redirect
+- `shareInviterName` - Boolean flag
+- `email` - Optional string for private invites
+- `role` - String representing the role to assign
+- `newAccount` - Optional boolean for private invites
+- `status` - Enum: "pending", "rejected", "canceled", "used"
+
+**inviteUse table**:
+- `id` - Primary key (string)
+- `inviteId` - Foreign key to invite table
+- `usedAt` - Timestamp when invite was used
+- `usedByUserId` - Foreign key to user table
+
+<Note>
+  The exact SQL syntax will vary depending on your database system. Refer to your Better Auth database adapter documentation for specific migration examples.
+</Note>
+
+## Verify installation
+
+To verify the plugin is installed correctly:
+
+```bash
+npm list better-auth-invite-plugin
+```
+
+You should see output confirming the package version:
+
+```
+[email protected]
+```
+
+## TypeScript support
+
+The plugin is written in TypeScript and includes type definitions. No additional setup is required for TypeScript projects.
+
+## Next steps
+
+Now that the plugin is installed, you're ready to configure it:
+
+<Card title="Quick start" icon="rocket" href="/quickstart">
+  Configure the plugin and create your first invite
+</Card>

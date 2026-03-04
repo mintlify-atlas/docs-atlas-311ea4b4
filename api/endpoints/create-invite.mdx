@@ -1,0 +1,325 @@
+---
+title: Create Invite
+description: POST /invite/create - Create a new invitation
+---
+
+## Endpoint
+
+```
+POST /invite/create
+```
+
+Create a new invitation to invite users to your application. Supports both private invites (with email) and public invites (shareable links).
+
+## Authentication
+
+This endpoint requires authentication. User must be logged in with a valid session.
+
+## Request Body
+
+<ParamField path="role" type="string" required>
+  The role to assign to the invited user.
+  
+  ```json
+  "role": "member"
+  ```
+</ParamField>
+
+<ParamField path="email" type="string">
+  The email address of the user to send an invitation email to. When provided, creates a private invite. When omitted, creates a public invite link.
+  
+  ```json
+  "email": "user@example.com"
+  ```
+</ParamField>
+
+<ParamField path="tokenType" type="'token' | 'code' | 'custom'">
+  Type of token to use:
+  - `"token"`: 24-character token
+  - `"code"`: 6-digit code
+  - `"custom"`: Uses `options.generateToken`
+  
+  **Default:** `options.defaultTokenType`
+  
+  ```json
+  "tokenType": "code"
+  ```
+</ParamField>
+
+<ParamField path="redirectToSignUp" type="string">
+  The URL to redirect the user to create their account. If the token is invalid or expired, redirects with `?error=INVALID_TOKEN`. If valid, redirects with `?token=VALID_TOKEN`.
+  
+  **Default:** `options.defaultRedirectToSignUp`
+  
+  ```json
+  "redirectToSignUp": "/register"
+  ```
+</ParamField>
+
+<ParamField path="redirectToSignIn" type="string">
+  The URL to redirect the user to upgrade their role.
+  
+  **Default:** `options.defaultRedirectToSignIn`
+  
+  ```json
+  "redirectToSignIn": "/login"
+  ```
+</ParamField>
+
+<ParamField path="maxUses" type="number">
+  The number of times an invitation can be used.
+  
+  **Default:** `options.defaultMaxUses` (1 for private invites, infinite for public invites)
+  
+  ```json
+  "maxUses": 5
+  ```
+</ParamField>
+
+<ParamField path="expiresIn" type="number">
+  Number of seconds the invitation token is valid for.
+  
+  **Default:** `options.invitationTokenExpiresIn` (3600 seconds / 1 hour)
+  
+  ```json
+  "expiresIn": 86400
+  ```
+</ParamField>
+
+<ParamField path="redirectToAfterUpgrade" type="string">
+  The URL to redirect the user to after upgrading their role (if the user is already logged in). `{token}` will be replaced with the user's actual token.
+  
+  **Default:** `options.defaultRedirectAfterUpgrade`
+  
+  ```json
+  "redirectToAfterUpgrade": "/dashboard?token={token}"
+  ```
+</ParamField>
+
+<ParamField path="shareInviterName" type="boolean">
+  Whether the inviter's name should be shared with the invitee. When enabled, the person receiving the invitation will see the name of the user who created the invitation.
+  
+  **Default:** `options.defaultShareInviterName` (true)
+  
+  ```json
+  "shareInviterName": true
+  ```
+</ParamField>
+
+<ParamField path="senderResponse" type="'token' | 'url'">
+  How should the sender receive the token. Only applies when no email is provided (public invites).
+  - `"token"`: Returns just the token string
+  - `"url"`: Returns the complete activation URL
+  
+  **Default:** `options.defaultSenderResponse` ("token")
+  
+  ```json
+  "senderResponse": "url"
+  ```
+</ParamField>
+
+<ParamField path="senderResponseRedirect" type="'signUp' | 'signIn'">
+  Where should the invite redirect the user? Only applies when no email is provided (public invites).
+  
+  **Default:** `options.defaultSenderResponseRedirect` ("signUp")
+  
+  ```json
+  "senderResponseRedirect": "signIn"
+  ```
+</ParamField>
+
+<ParamField path="customInviteUrl" type="string">
+  Custom URL pattern for the invitation. Use `{token}` and `{callbackUrl}` placeholders, which will be replaced with their actual values.
+  
+  ```json
+  "customInviteUrl": "https://example.com/invite/{token}?callback={callbackUrl}"
+  ```
+</ParamField>
+
+## Response
+
+### Success Response (200)
+
+<ResponseField name="status" type="boolean">
+  Always `true` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  For **private invites** (with email): `"The invitation was sent"`
+  
+  For **public invites** (no email): Contains the token or URL based on `senderResponse` setting.
+</ResponseField>
+
+## Examples
+
+### Private Invite (with Email)
+
+**Request:**
+
+```json
+POST /invite/create
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "role": "member",
+  "tokenType": "code",
+  "shareInviterName": true
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "The invitation was sent"
+}
+```
+
+The user at `newuser@example.com` will receive an email via the `sendUserInvitation` function configured in plugin options.
+
+### Public Invite (Shareable Link)
+
+**Request:**
+
+```json
+POST /invite/create
+Content-Type: application/json
+
+{
+  "role": "member",
+  "maxUses": 10,
+  "senderResponse": "url",
+  "senderResponseRedirect": "signUp"
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "http://localhost:3000/api/auth/invite/activate?token=abc123xyz789&callbackURL=/auth/sign-up"
+}
+```
+
+The `message` field contains the shareable invitation URL.
+
+### Invite with Custom Settings
+
+**Request:**
+
+```json
+POST /invite/create
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "role": "admin",
+  "tokenType": "token",
+  "maxUses": 1,
+  "expiresIn": 86400,
+  "redirectToAfterUpgrade": "/admin/dashboard",
+  "shareInviterName": false
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": true,
+  "message": "The invitation was sent"
+}
+```
+
+## Error Responses
+
+### Insufficient Permissions (400)
+
+```json
+{
+  "message": "User does not have sufficient permissions to create invite",
+  "errorCode": "INSUFFICIENT_PERMISSIONS"
+}
+```
+
+Returned when:
+- User doesn't have permission based on `canCreateInvite` option
+- User doesn't meet custom permission requirements
+
+### Invitation Email Not Enabled (500)
+
+```json
+{
+  "message": "Invitation email is not enabled"
+}
+```
+
+Returned when:
+- Creating a private invite without configuring `sendUserInvitation` in plugin options
+
+### Email Sending Failed (500)
+
+```json
+{
+  "message": "Error sending the invitation email"
+}
+```
+
+Returned when:
+- The `sendUserInvitation` function throws an error
+
+## Behavior
+
+### Private Invites (with email)
+
+1. Checks if the email belongs to an existing user
+2. Determines if this is a new account invitation or role upgrade
+3. Creates invitation record in database
+4. Sends email via `sendUserInvitation` function
+5. Returns success confirmation
+
+### Public Invites (without email)
+
+1. Creates invitation record with no email restriction
+2. Returns token or URL based on `senderResponse` setting
+3. Token/URL can be shared and used by anyone (up to `maxUses` times)
+
+## Hooks
+
+The following hooks are triggered during this endpoint:
+
+- `beforeCreateInvite`: Called before creating the invitation
+- `afterCreateInvite`: Called after the invitation is created successfully
+
+## Permissions
+
+Permission is checked using the `canCreateInvite` option:
+
+```typescript
+// Function-based permission
+canCreateInvite: async ({ invitedUser, inviterUser, ctx }) => {
+  return inviterUser.role === 'admin';
+}
+
+// Permission object
+canCreateInvite: {
+  statement: "user:invite:create",
+  permissions: ["admin", "manager"]
+}
+```
+
+## Source Code Reference
+
+Implementation: `src/routes/create-invite.ts:13-193`
+
+Body schema: `src/body.ts:4-122`
+
+## Related
+
+- [Activate Invite](/api/endpoints/activate-invite) - Activate an invitation token
+- [Get Invite](/api/endpoints/get-invite) - Get invitation details
+- [Cancel Invite](/api/endpoints/cancel-invite) - Cancel a pending invitation
+- [InviteOptions](/api/options) - Plugin configuration options

@@ -1,0 +1,446 @@
+---
+title: InviteOptions
+description: Complete configuration options for the Better Auth Invite Plugin
+---
+
+## Overview
+
+The `InviteOptions` type defines all configuration options available for the invite plugin. These options control invitation behavior, permissions, token generation, email sending, and lifecycle hooks.
+
+## Type Definition
+
+```typescript
+export type InviteOptions = {
+  getDate?: () => Date;
+  canCreateInvite?: ((data: { invitedUser: { email?: string; role: string; }; inviterUser: UserWithRole; ctx: GenericEndpointContext; }) => Promise<boolean> | boolean) | boolean | Permissions;
+  canAcceptInvite?: ((data: { invitedUser: UserWithRole; newAccount: boolean; }) => Promise<boolean> | boolean) | boolean | Permissions;
+  canCancelInvite?: ((data: { inviterUser: UserWithRole; invitation: InviteTypeWithId; ctx: GenericEndpointContext; }) => Promise<boolean> | boolean) | boolean | Permissions;
+  canRejectInvite?: ((data: { inviteeUser: UserWithRole; invitation: InviteTypeWithId; ctx: GenericEndpointContext; }) => Promise<boolean> | boolean) | boolean | Permissions;
+  generateToken?: () => string;
+  defaultTokenType?: TokensType;
+  defaultRedirectToSignUp?: string;
+  defaultRedirectToSignIn?: string;
+  defaultRedirectAfterUpgrade?: string;
+  defaultShareInviterName?: boolean;
+  defaultMaxUses?: number;
+  defaultSenderResponse?: "token" | "url";
+  defaultSenderResponseRedirect?: "signUp" | "signIn";
+  sendUserInvitation?: (data: { email: string; name?: string; role: string; url: string; token: string; newAccount: boolean; }, request?: Request) => Promise<void> | void;
+  sendUserRoleUpgrade?: (data: { email: string; role: string; url: string; token: string; }, request?: Request) => Promise<void> | void;
+  invitationTokenExpiresIn?: number;
+  inviteCookieMaxAge?: number;
+  cleanupInvitesOnDecision?: boolean;
+  cleanupInvitesAfterMaxUses?: boolean;
+  defaultCustomInviteUrl?: string;
+  onInvitationUsed?: (data: { invitedUser: UserWithRole; newUser: UserWithRole; newAccount: boolean; }, request?: Request) => Promise<void> | void;
+  schema?: InferOptionSchema<InviteSchema>;
+  inviteHooks?: { /* see Hooks section */ };
+};
+```
+
+## Date & Time Options
+
+<ParamField path="getDate" type="() => Date" default="() => new Date()">
+  A function to generate the current date. Useful for testing or custom date handling.
+  
+  ```typescript
+  getDate: () => new Date()
+  ```
+</ParamField>
+
+<ParamField path="invitationTokenExpiresIn" type="number" default="3600">
+  Number of seconds the invitation token is valid for.
+  
+  **Default:** `3600` (1 hour)
+  
+  ```typescript
+  invitationTokenExpiresIn: 60 * 60 * 24 // 24 hours
+  ```
+</ParamField>
+
+<ParamField path="inviteCookieMaxAge" type="number" default="600">
+  Maximum age (in seconds) for the invitation cookie. This controls how long users have to complete the login flow before activating the token if they are not logged in.
+  
+  **Default:** `600` (10 minutes)
+  
+  ```typescript
+  inviteCookieMaxAge: 60 * 15 // 15 minutes
+  ```
+</ParamField>
+
+## Permission Options
+
+<ParamField path="canCreateInvite" type="function | boolean | Permissions" default="true">
+  A function or value that determines if a user can create an invite.
+  
+  Can be:
+  - A boolean value
+  - A function that returns a boolean (sync or async)
+  - A [Permissions](/api/types/permissions) object
+  
+  ```typescript
+  // As a function
+  canCreateInvite: async ({ invitedUser, inviterUser, ctx }) => {
+    return inviterUser.role === 'admin';
+  }
+  
+  // As permissions object
+  canCreateInvite: {
+    statement: "user:invite:create",
+    permissions: ["admin", "manager"]
+  }
+  
+  // As boolean
+  canCreateInvite: true
+  ```
+</ParamField>
+
+<ParamField path="canAcceptInvite" type="function | boolean | Permissions" default="true">
+  A function or value that determines if a user can accept an invite.
+  
+  ```typescript
+  canAcceptInvite: async ({ invitedUser, newAccount }) => {
+    if (newAccount) {
+      // Additional checks for new accounts
+      return true;
+    }
+    return invitedUser.emailVerified === true;
+  }
+  ```
+</ParamField>
+
+<ParamField path="canCancelInvite" type="function | boolean | Permissions" default="true">
+  A function or value that determines if a user can cancel an invite.
+  
+  **Note:** Regardless of this option, only the user who created the invite can cancel it.
+  
+  ```typescript
+  canCancelInvite: async ({ inviterUser, invitation, ctx }) => {
+    // Additional permission checks
+    return inviterUser.role === 'admin';
+  }
+  ```
+</ParamField>
+
+<ParamField path="canRejectInvite" type="function | boolean | Permissions" default="true">
+  A function or value that determines if a user can reject an invite.
+  
+  **Note:** Regardless of this option, only the invitee (user whose email matches the invite email for private invites) can reject it.
+  
+  ```typescript
+  canRejectInvite: async ({ inviteeUser, invitation, ctx }) => {
+    return true; // Allow all invitees to reject
+  }
+  ```
+</ParamField>
+
+## Token Options
+
+<ParamField path="generateToken" type="() => string">
+  A function to generate a custom token. Required when `defaultTokenType` is set to `"custom"`.
+  
+  ```typescript
+  generateToken: () => {
+    return customGenerateSecureToken();
+  }
+  ```
+</ParamField>
+
+<ParamField path="defaultTokenType" type="'token' | 'code' | 'custom'" default="'token'">
+  The default token type:
+  - `"token"`: 24-character random token (via `generateId(24)`)
+  - `"code"`: 6-character alphanumeric code (via `generateRandomString(6, "0-9", "A-Z")`)
+  - `"custom"`: Uses the `generateToken` function
+  
+  ```typescript
+  defaultTokenType: "code"
+  ```
+</ParamField>
+
+## Redirect Options
+
+<ParamField path="defaultRedirectToSignUp" type="string" default="'/auth/sign-up'">
+  The default URL to redirect users to create their account.
+  
+  ```typescript
+  defaultRedirectToSignUp: "/register"
+  ```
+</ParamField>
+
+<ParamField path="defaultRedirectToSignIn" type="string" default="'/auth/sign-in'">
+  The default URL to redirect users to sign in.
+  
+  ```typescript
+  defaultRedirectToSignIn: "/login"
+  ```
+</ParamField>
+
+<ParamField path="defaultRedirectAfterUpgrade" type="string">
+  The default redirect URL after upgrading a role (or logging in with an invite). `{token}` will be replaced with the user's actual token.
+  
+  ```typescript
+  defaultRedirectAfterUpgrade: "/dashboard?token={token}"
+  ```
+</ParamField>
+
+<ParamField path="defaultCustomInviteUrl" type="string">
+  Custom URL pattern for invite activation. Use `{token}` and `{callbackUrl}` placeholders, which will be replaced with their actual values.
+  
+  ```typescript
+  defaultCustomInviteUrl: "https://example.com/invite/{token}?callback={callbackUrl}"
+  ```
+</ParamField>
+
+## Invitation Behavior Options
+
+<ParamField path="defaultShareInviterName" type="boolean" default="true">
+  Whether the inviter's name should be shared with the invitee by default.
+  
+  When enabled, the person receiving the invitation will see the name of the user who created the invitation.
+  
+  ```typescript
+  defaultShareInviterName: false
+  ```
+</ParamField>
+
+<ParamField path="defaultMaxUses" type="number" default="1 for private, infinite for public">
+  Maximum times an invite can be used.
+  
+  **Default:** `1` on private invites (with email) and `Infinity` on public invites (no email)
+  
+  ```typescript
+  defaultMaxUses: 5 // Allow 5 uses
+  ```
+</ParamField>
+
+<ParamField path="defaultSenderResponse" type="'token' | 'url'" default="'token'">
+  How should the sender receive the token. Only applies when no email is provided (public invites).
+  
+  - `"token"`: Return just the token string
+  - `"url"`: Return the complete activation URL
+  
+  ```typescript
+  defaultSenderResponse: "url"
+  ```
+</ParamField>
+
+<ParamField path="defaultSenderResponseRedirect" type="'signUp' | 'signIn'" default="'signUp'">
+  Where should the invite redirect the user by default. Only applies when no email is provided (public invites).
+  
+  ```typescript
+  defaultSenderResponseRedirect: "signIn"
+  ```
+</ParamField>
+
+## Cleanup Options
+
+<ParamField path="cleanupInvitesOnDecision" type="boolean" default="false">
+  Delete invitations when a decision is made (rejected or canceled).
+  
+  When `true`, invitations are permanently deleted from the database. When `false`, they are marked with the appropriate status.
+  
+  ```typescript
+  cleanupInvitesOnDecision: true
+  ```
+</ParamField>
+
+<ParamField path="cleanupInvitesAfterMaxUses" type="boolean" default="false">
+  Delete invitations after they reach max uses.
+  
+  ```typescript
+  cleanupInvitesAfterMaxUses: true
+  ```
+</ParamField>
+
+## Email & Notification Options
+
+<ParamField path="sendUserInvitation" type="function">
+  Function to send an invitation email to the user. This function is called for both new user invitations and role upgrade invitations.
+  
+  ```typescript
+  sendUserInvitation: async (data, request) => {
+    const { email, name, role, url, token, newAccount } = data;
+    
+    await emailService.send({
+      to: email,
+      subject: newAccount ? 'You\'re Invited!' : 'Role Upgrade',
+      template: newAccount ? 'new-user' : 'role-upgrade',
+      variables: { name, role, url, token }
+    });
+  }
+  ```
+  
+  **Parameters:**
+  - `data.email` (string): Recipient email address
+  - `data.name` (string | undefined): Recipient name if available
+  - `data.role` (string): Role being assigned
+  - `data.url` (string): Activation URL
+  - `data.token` (string): Invitation token
+  - `data.newAccount` (boolean): Whether this is for a new account
+  - `request` (Request | undefined): The original HTTP request object
+</ParamField>
+
+<ParamField path="sendUserRoleUpgrade" type="function" deprecated>
+  **Deprecated:** Use `sendUserInvitation` instead, which now receives the `newAccount` parameter.
+  
+  Send user role upgrade email.
+  
+  ```typescript
+  sendUserRoleUpgrade: async (data, request) => {
+    await emailService.send({
+      to: data.email,
+      subject: 'Your role has been upgraded',
+      template: 'role-upgrade',
+      variables: { role: data.role, url: data.url }
+    });
+  }
+  ```
+</ParamField>
+
+<ParamField path="onInvitationUsed" type="function">
+  A callback function triggered when an invitation is successfully used.
+  
+  ```typescript
+  onInvitationUsed: async (data, request) => {
+    const { invitedUser, newUser, newAccount } = data;
+    
+    // Log the event
+    await analytics.track('invitation_used', {
+      invitedUserId: invitedUser.id,
+      newUserId: newUser.id,
+      newAccount,
+    });
+    
+    // Send notification
+    await notifyUser(invitedUser.id, `User ${newUser.email} accepted your invite`);
+  }
+  ```
+  
+  **Parameters:**
+  - `data.invitedUser` (UserWithRole): User who created the invitation
+  - `data.newUser` (UserWithRole): User who accepted the invitation
+  - `data.newAccount` (boolean): Whether a new account was created
+  - `request` (Request | undefined): The original HTTP request object
+</ParamField>
+
+## Schema Options
+
+<ParamField path="schema" type="InferOptionSchema<InviteSchema>">
+  Custom schema for the invite plugin. Allows extending the default database schema with additional fields.
+  
+  ```typescript
+  schema: {
+    invite: {
+      fields: {
+        customField: {
+          type: "string",
+          required: false,
+        }
+      }
+    }
+  }
+  ```
+</ParamField>
+
+## Hooks
+
+<ParamField path="inviteHooks" type="object">
+  Lifecycle hooks for invitation events. All hooks are optional.
+  
+  <Expandable title="Available Hooks">
+    <ParamField path="beforeCreateInvite" type="function">
+      Runs before a user creates an invite.
+      
+      ```typescript
+      beforeCreateInvite: async ({ ctx }) => {
+        // Validation or setup logic
+      }
+      ```
+    </ParamField>
+    
+    <ParamField path="afterCreateInvite" type="function">
+      Runs after a user creates an invite.
+      
+      ```typescript
+      afterCreateInvite: async ({ ctx, invitation }) => {
+        await logEvent('invite_created', { inviteId: invitation.id });
+      }
+      ```
+    </ParamField>
+    
+    <ParamField path="beforeAcceptInvite" type="function">
+      Runs before a user accepts an invite. Can return a user object to override the invited user.
+      
+      ```typescript
+      beforeAcceptInvite: async ({ ctx, invitedUser }) => {
+        return {
+          user: {
+            ...invitedUser,
+            name: 'Custom Name',
+          }
+        };
+      }
+      ```
+    </ParamField>
+    
+    <ParamField path="afterAcceptInvite" type="function">
+      Runs after a user accepts an invite.
+      
+      ```typescript
+      afterAcceptInvite: async ({ ctx, invitation, invitedUser }) => {
+        await sendWelcomeEmail(invitedUser.email);
+      }
+      ```
+    </ParamField>
+    
+    <ParamField path="beforeCancelInvite" type="function">
+      Runs before a user cancels an invite.
+      
+      ```typescript
+      beforeCancelInvite: async ({ ctx, invitation }) => {
+        // Pre-cancellation logic
+      }
+      ```
+    </ParamField>
+    
+    <ParamField path="afterCancelInvite" type="function">
+      Runs after a user cancels an invite.
+      
+      ```typescript
+      afterCancelInvite: async ({ ctx, invitation }) => {
+        await notifyInvitee(invitation.email, 'Invite was cancelled');
+      }
+      ```
+    </ParamField>
+    
+    <ParamField path="beforeRejectInvite" type="function">
+      Runs before a user rejects an invite.
+      
+      ```typescript
+      beforeRejectInvite: async ({ ctx, invitation }) => {
+        // Pre-rejection logic
+      }
+      ```
+    </ParamField>
+    
+    <ParamField path="afterRejectInvite" type="function">
+      Runs after a user rejects an invite.
+      
+      ```typescript
+      afterRejectInvite: async ({ ctx, invitation }) => {
+        await notifyInviter(invitation.createdByUserId, 'Invite was rejected');
+      }
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Source Code Reference
+
+Type definition: `src/types.ts:5-303`
+
+## Related
+
+- [invite()](/api/invite) - Main plugin function
+- [Permissions Type](/api/types/permissions) - Permission configuration
+- [InviteType](/api/types/invite-type) - Invitation data structure

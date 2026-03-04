@@ -1,0 +1,415 @@
+---
+title: Role-Based Invitations
+description: Invite users with different roles and implement role upgrade workflows
+---
+
+This example demonstrates how to create invitations with different roles and handle role upgrades for existing users.
+
+## Overview
+
+Role-based invitations allow you to:
+- Assign specific roles when creating invitations
+- Upgrade existing user roles through invites
+- Implement permission checks for invite creation
+- Handle different flows for new vs. existing users
+
+## Server Configuration
+
+<Steps>
+
+<Step title="Define Roles">
+
+First, set up your role system with Better Auth's admin plugin:
+
+```ts lib/auth.ts
+import { betterAuth } from "better-auth";
+import { admin } from "better-auth/plugins";
+import { invite } from "better-auth-invite-plugin";
+import { AccessControl } from "accesscontrol";
+
+const ac = new AccessControl();
+
+// Define permissions
+ac.grant("user")
+  .readOwn("profile")
+  .updateOwn("profile");
+
+ac.grant("moderator")
+  .extend("user")
+  .readAny("post")
+  .updateAny("post");
+
+ac.grant("admin")
+  .extend("moderator")
+  .createAny("invite")
+  .deleteAny("post")
+  .updateAny("role");
+
+export const auth = betterAuth({
+  database: {
+    // Your database config
+  },
+  plugins: [
+    admin({
+      ac,
+      roles: {
+        user: "user",
+        moderator: "moderator",
+        admin: "admin",
+      },
+      defaultRole: "user",
+    }),
+    invite({
+      // Control who can create invites
+      canCreateInvite: async ({ invitedUser, inviterUser, ctx }) => {
+        // Only admins can create invites
+        if (inviterUser.role !== "admin") {
+          return false;
+        }
+        
+        // Admins cannot invite other admins (optional rule)
+        if (invitedUser.role === "admin" && inviterUser.role !== "admin") {
+          return false;
+        }
+        
+        return true;
+      },
+      
+      // Send different emails based on new account vs role upgrade
+      async sendUserInvitation({ email, name, role, url, newAccount }) {
+        if (newAccount) {
+          await sendEmail({
+            to: email,
+            subject: `You're invited as ${role}!`,
+            html: `
+              <h1>Welcome ${name || 'there'}!</h1>
+              <p>You've been invited to join our platform as a <strong>${role}</strong>.</p>
+              <p><a href="${url}">Create your account</a></p>
+            `,
+          });
+        } else {
+          await sendEmail({
+            to: email,
+            subject: `Your role has been upgraded to ${role}`,
+            html: `
+              <h1>Hello ${name}!</h1>
+              <p>Great news! Your role has been upgraded to <strong>${role}</strong>.</p>
+              <p><a href="${url}">Activate your new role</a></p>
+            `,
+          });
+        }
+      },
+      
+      defaultRedirectAfterUpgrade: "/dashboard/role-upgraded",
+    }),
+  ],
+});
+```
+
+</Step>
+
+<Step title="Add Permission Checks">
+
+You can also use the permissions system directly:
+
+```ts lib/auth.ts
+import { invite } from "better-auth-invite-plugin";
+
+export const auth = betterAuth({
+  // ... other config
+  plugins: [
+    invite({
+      // Use statement-based permissions
+      canCreateInvite: {
+        statement: "user can invite users with specific roles",
+        permissions: ["create:invite"],
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+
+</Steps>
+
+## Client Implementation
+
+<Steps>
+
+<Step title="Multi-Role Invite Form">
+
+Create a form that allows selecting different roles:
+
+```tsx components/role-invite-form.tsx
+"use client";
+
+import { useState } from "react";
+import { authClient } from "@/lib/auth-client";
+
+const ROLES = [
+  { value: "user", label: "User", description: "Basic access" },
+  { value: "moderator", label: "Moderator", description: "Can manage content" },
+  { value: "admin", label: "Admin", description: "Full access" },
+];
+
+export function RoleInviteForm() {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("user");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setResult(null);
+
+    try {
+      const { data, error } = await authClient.invite.create({
+        email,
+        role,
+      });
+
+      if (error) {
+        if (error.message?.includes("INSUFFICIENT_PERMISSIONS")) {
+          setResult({
+            type: "error",
+            message: "You don't have permission to create invites with this role",
+          });
+        } else {
+          setResult({ type: "error", message: error.message || "Failed to send invitation" });
+        }
+      } else {
+        setResult({
+          type: "success",
+          message: `Invitation sent to ${email} with ${role} role!`,
+        });
+        setEmail("");
+      }
+    } catch (err) {
+      setResult({ type: "error", message: "An unexpected error occurred" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="max-w-md space-y-4">
+      <div>
+        <label htmlFor="email" className="block text-sm font-medium mb-1">
+          Email Address
+        </label>
+        <input
+          id="email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          className="w-full px-3 py-2 border border-gray-300 rounded-md"
+          placeholder="user@example.com"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium mb-2">Role</label>
+        <div className="space-y-2">
+          {ROLES.map((r) => (
+            <label key={r.value} className="flex items-start space-x-3 p-3 border rounded-md cursor-pointer hover:bg-gray-50">
+              <input
+                type="radio"
+                value={r.value}
+                checked={role === r.value}
+                onChange={(e) => setRole(e.target.value)}
+                className="mt-1"
+              />
+              <div>
+                <div className="font-medium">{r.label}</div>
+                <div className="text-sm text-gray-600">{r.description}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50"
+      >
+        {loading ? "Sending..." : "Send Invitation"}
+      </button>
+
+      {result && (
+        <div
+          className={`p-3 rounded-md ${
+            result.type === "error" ? "bg-red-50 text-red-800" : "bg-green-50 text-green-800"
+          }`}
+        >
+          {result.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+</Step>
+
+<Step title="Role Upgrade Welcome Page">
+
+Create a welcome page for users who received role upgrades:
+
+```tsx app/dashboard/role-upgraded/page.tsx
+"use client";
+
+import { useSession } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
+
+export default function RoleUpgradedPage() {
+  const { data: session } = useSession();
+  const router = useRouter();
+
+  if (!session) {
+    router.push("/auth/sign-in");
+    return null;
+  }
+
+  const roleMessages = {
+    user: {
+      title: "Welcome to the platform!",
+      description: "You can now access all basic features.",
+      features: ["View content", "Update your profile", "Participate in discussions"],
+    },
+    moderator: {
+      title: "You're now a Moderator!",
+      description: "You have new powers to manage content.",
+      features: ["Moderate posts", "Manage comments", "Review reports"],
+    },
+    admin: {
+      title: "Welcome, Admin!",
+      description: "You have full access to the platform.",
+      features: ["Manage users", "Configure settings", "Access analytics", "Create invites"],
+    },
+  };
+
+  const role = session.user.role || "user";
+  const message = roleMessages[role as keyof typeof roleMessages] || roleMessages.user;
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
+        <div className="text-center mb-6">
+          <div className="text-6xl mb-4">🎉</div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{message.title}</h1>
+          <p className="text-gray-600">{message.description}</p>
+        </div>
+
+        <div className="mb-6">
+          <h2 className="font-semibold text-gray-900 mb-3">Your new abilities:</h2>
+          <ul className="space-y-2">
+            {message.features.map((feature, idx) => (
+              <li key={idx} className="flex items-center text-gray-700">
+                <span className="text-green-500 mr-2">✓</span>
+                {feature}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
+        >
+          Go to Dashboard
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+</Step>
+
+</Steps>
+
+## Advanced: Custom Role Logic
+
+<Steps>
+
+<Step title="Dynamic Role Assignment">
+
+Use hooks to modify user roles based on custom logic:
+
+```ts lib/auth.ts
+import { invite } from "better-auth-invite-plugin";
+
+export const auth = betterAuth({
+  // ... other config
+  plugins: [
+    invite({
+      inviteHooks: {
+        beforeAcceptInvite: async ({ invitedUser, ctx }) => {
+          // Custom logic to modify the user before accepting
+          const userInviteCount = await ctx.context.internalAdapter
+            .findUserById(invitedUser.id);
+          
+          // Automatically upgrade to moderator after 5 successful invites
+          if (userInviteCount && userInviteCount.invitesCreated >= 5) {
+            return {
+              user: {
+                ...invitedUser,
+                role: "moderator",
+              },
+            };
+          }
+        },
+        
+        afterAcceptInvite: async ({ invitation, invitedUser, ctx }) => {
+          // Log role assignment
+          await logRoleChange({
+            userId: invitedUser.id,
+            newRole: invitation.role,
+            changedBy: invitation.createdByUserId,
+            timestamp: new Date(),
+          });
+        },
+      },
+    }),
+  ],
+});
+```
+
+</Step>
+
+<Step title="Role-Specific Expiration">
+
+Set different expiration times based on role:
+
+```tsx components/role-invite-form.tsx
+const { data, error } = await authClient.invite.create({
+  email,
+  role,
+  // Admin invites expire in 7 days, others in 24 hours
+  expiresIn: role === "admin" ? 7 * 24 * 60 * 60 : 24 * 60 * 60,
+});
+```
+
+</Step>
+
+</Steps>
+
+## Key Concepts
+
+<Note>
+**New Account vs Role Upgrade**: The plugin automatically detects whether the invited email belongs to an existing user. If it does, the `newAccount` parameter will be `false`, and the invitation is treated as a role upgrade rather than a new account creation.
+</Note>
+
+<Note>
+**Permission Hierarchy**: When using `canCreateInvite`, you can implement hierarchical rules where admins can invite moderators, moderators can invite users, but users cannot invite anyone.
+</Note>
+
+## Next Steps
+
+- Implement [custom email handlers](/examples/custom-email-handler) for different roles
+- Create an [invite dashboard](/examples/invite-dashboard) to track role assignments
+- Learn about [public invite codes](/examples/public-invite-codes)

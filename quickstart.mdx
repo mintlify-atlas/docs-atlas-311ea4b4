@@ -1,80 +1,424 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Get started with the Better Auth Invite Plugin in minutes with this complete end-to-end guide
 ---
 
-## Get started in three steps
+This guide walks you through setting up the invite plugin and creating your first working invitation system.
 
-Get your documentation site running locally and make your first customization.
+## Server setup
 
-### Step 1: Set up your local environment
+### Configure the plugin
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+Import and configure the `invite` plugin in your Better Auth server configuration:
+
+```ts auth.ts
+import { betterAuth } from "better-auth";
+import { admin } from "better-auth/plugins";
+import { invite } from "better-auth-invite-plugin";
+
+export const auth = betterAuth({
+  database: {
+    // your database configuration
+  },
+  plugins: [
+    // Admin plugin is recommended for role management
+    admin({
+      roles: {
+        user: { name: "user" },
+        admin: { name: "admin" }
+      },
+      defaultRole: "user"
+    }),
+    invite({
+      // Where to redirect users after they accept an invite
+      defaultRedirectAfterUpgrade: "/auth/invited",
+      
+      // Email sending function for private invites
+      async sendUserInvitation({ email, role, url, token, newAccount, name }) {
+        // Send the invitation email using your email service
+        await sendEmail({
+          to: email,
+          subject: newAccount 
+            ? `You're invited to join our platform!` 
+            : `Role upgrade invitation`,
+          html: `
+            <p>Hi ${name || 'there'},</p>
+            <p>${newAccount 
+              ? 'You have been invited to create an account.' 
+              : 'You have been invited to upgrade your role.'}
+            </p>
+            <p>Role: ${role}</p>
+            <p><a href="${url}">Click here to accept</a></p>
+            <p>Or use this code: ${token}</p>
+          `
+        });
+      }
+    })
+  ],
+  emailAndPassword: {
+    enabled: true
+  }
+});
+```
+
+<Note>
+  Replace `sendEmail` with your actual email sending function. Popular options include Resend, SendGrid, Nodemailer, or AWS SES.
+</Note>
+
+### Configuration options
+
+Here are some commonly used configuration options:
+
+```ts
+invite({
+  // Redirect URLs
+  defaultRedirectAfterUpgrade: "/welcome",
+  defaultRedirectToSignUp: "/auth/sign-up",
+  defaultRedirectToSignIn: "/auth/sign-in",
+  
+  // Token settings
+  defaultTokenType: "token", // "token" | "code" | "custom"
+  invitationTokenExpiresIn: 60 * 60 * 24 * 7, // 7 days in seconds
+  
+  // Usage limits
+  defaultMaxUses: 1, // For private invites
+  
+  // Privacy
+  defaultShareInviterName: true,
+  
+  // Email function
+  async sendUserInvitation({ email, role, url, token, newAccount }) {
+    // Your email logic here
+  },
+  
+  // Permission checks (optional)
+  canCreateInvite: async ({ inviterUser, invitedUser, ctx }) => {
+    // Custom permission logic
+    return inviterUser.role === "admin";
+  }
+})
+```
+
+## Client setup
+
+### Configure the client plugin
+
+Add the `inviteClient` plugin to your Better Auth client:
+
+```ts auth-client.ts
+import { createAuthClient } from "better-auth/client";
+import { adminClient } from "better-auth/client/plugins";
+import { inviteClient } from "better-auth-invite-plugin";
+
+export const authClient = createAuthClient({
+  baseURL: "http://localhost:3000",
+  plugins: [
+    adminClient(),
+    inviteClient()
+  ]
+});
+```
+
+<Info>
+  The client plugin automatically infers the server plugin's types, giving you full TypeScript support.
+</Info>
+
+## Create your first invite
+
+Now you can create invitations from your application code.
+
+### Private invite (with email)
+
+Private invites are sent to a specific email address:
+
+```ts
+import { authClient } from "@/lib/auth-client";
+
+// User must be authenticated to create invites
+const { data, error } = await authClient.invite.create({
+  role: "admin",
+  email: "[email protected]",
+  // The email will be sent automatically via sendUserInvitation
+});
+
+if (error) {
+  console.error("Failed to create invite:", error);
+} else {
+  console.log("Invite sent successfully!");
+  // Response: { status: true, message: "The invitation was sent" }
+}
+```
+
+### Public invite (shareable link)
+
+Public invites generate a token or URL that can be shared with anyone:
+
+```ts
+const { data, error } = await authClient.invite.create({
+  role: "user",
+  senderResponse: "token" // Returns the token
+});
+
+if (data) {
+  console.log("Invite token:", data.message);
+  // Share this token with your users
+  // Example: "kx8f9j2l3m4n5p6q7r8s9t0u"
+}
+```
+
+To get a full URL instead:
+
+```ts
+const { data, error } = await authClient.invite.create({
+  role: "user",
+  senderResponse: "url" // Returns the full URL
+});
+
+if (data) {
+  console.log("Invite URL:", data.message);
+  // Example: "http://localhost:3000/api/auth/invite/TOKEN?callbackURL=%2Fauth%2Fsign-up"
+}
+```
+
+### Custom token types
+
+<Tabs>
+  <Tab title="6-digit code">
+    ```ts
+    const { data, error } = await authClient.invite.create({
+      role: "user",
+      tokenType: "code",
+      senderResponse: "token"
+    });
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    // Returns a 6-character code like "A7B9C2"
+    ```
+  </Tab>
+  
+  <Tab title="Custom token">
+    First, configure a custom token generator on the server:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    ```ts auth.ts
+    invite({
+      generateToken: () => {
+        // Your custom token generation logic
+        return `INVITE-${crypto.randomUUID()}`;
+      },
+      // ... other options
+    })
+    ```
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    Then use it:
+    
+    ```ts
+    const { data, error } = await authClient.invite.create({
+      role: "user",
+      tokenType: "custom",
+      senderResponse: "token"
+    });
+    ```
+  </Tab>
+</Tabs>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Activate an invite
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+When a user receives an invite, they need to activate it before signing up or signing in.
 
-### Step 3: Go live
+### Email link activation
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+If the user clicks the email link, the invite is automatically activated via the callback URL. The token is stored in a cookie and will be consumed when they complete sign-up or sign-in.
+
+### Manual activation
+
+You can also manually activate an invite using the API:
+
+```ts
+const { data, error } = await authClient.invite.activate({
+  token: "kx8f9j2l3m4n5p6q7r8s9t0u",
+  callbackURL: "/auth/sign-up" // Optional: where to redirect
+});
+
+if (error) {
+  console.error("Failed to activate invite:", error);
+} else {
+  console.log("Invite activated!", data);
+  // Cookie is now set with the invite token
+  // Redirect user to sign up or sign in
+}
+```
+
+<Note>
+  After activation, a cookie named `{your-app-name}.invite-code` is set in the user's browser. This cookie will be automatically validated and consumed during authentication.
+</Note>
+
+## Complete the flow
+
+After activating the invite, the user proceeds to sign up or sign in:
+
+```ts
+// If it's a new user
+const { data, error } = await authClient.signUp.email({
+  email: "[email protected]",
+  password: "securePassword123",
+  name: "Jane Doe"
+});
+
+// OR if user already exists
+const { data, error } = await authClient.signIn.email({
+  email: "[email protected]",
+  password: "securePassword123"
+});
+```
+
+<Steps>
+  <Step title="Hook triggers">
+    After successful authentication, the plugin's hook automatically runs.
+  </Step>
+  
+  <Step title="Validation">
+    The invite token from the cookie is validated (expiration, max uses, etc.).
+  </Step>
+  
+  <Step title="Role assignment">
+    The user's role is set or upgraded according to the invite.
+  </Step>
+  
+  <Step title="Tracking">
+    A record is created in the `inviteUse` table tracking who used the invite.
+  </Step>
+  
+  <Step title="Cleanup">
+    The invite cookie is cleared.
+  </Step>
+  
+  <Step title="Redirect">
+    The user is redirected to `defaultRedirectAfterUpgrade` (e.g., `/auth/invited`).
+  </Step>
+</Steps>
+
+## Handle the welcome page
+
+Create a welcome page at the redirect URL to show users their new role:
+
+```tsx app/auth/invited/page.tsx
+"use client";
+
+import { useSession } from "@/lib/auth-client";
+
+export default function InvitedPage() {
+  const { data: session } = useSession();
+  
+  return (
+    <div>
+      <h1>Welcome to the platform!</h1>
+      <p>You've successfully joined with the role: {session?.user.role}</p>
+      <a href="/dashboard">Go to Dashboard</a>
+    </div>
+  );
+}
+```
+
+## Additional operations
+
+### Get invite information
+
+```ts
+const { data, error } = await authClient.invite.get({
+  query: {
+    token: "kx8f9j2l3m4n5p6q7r8s9t0u"
+  }
+});
+
+if (data) {
+  console.log("Inviter:", data.inviter.name);
+  console.log("Role:", data.invitation.role);
+  console.log("New account:", data.invitation.newAccount);
+}
+```
+
+### Cancel an invite
+
+Only the user who created the invite can cancel it:
+
+```ts
+const { data, error } = await authClient.invite.cancel({
+  token: "kx8f9j2l3m4n5p6q7r8s9t0u"
+});
+
+if (data) {
+  console.log("Invite cancelled");
+}
+```
+
+### Reject an invite
+
+For private invites, the invitee can reject the invitation:
+
+```ts
+const { data, error } = await authClient.invite.reject({
+  token: "kx8f9j2l3m4n5p6q7r8s9t0u"
+});
+
+if (data) {
+  console.log("Invite rejected");
+}
+```
+
+## Testing your setup
+
+Here's a simple test to verify everything works:
+
+<Steps>
+  <Step title="Create a test invite">
+    ```ts
+    const { data } = await authClient.invite.create({
+      role: "user",
+      senderResponse: "token"
+    });
+    const token = data?.message;
+    ```
+  </Step>
+  
+  <Step title="Activate it">
+    ```ts
+    await authClient.invite.activate({ token });
+    ```
+  </Step>
+  
+  <Step title="Sign up">
+    ```ts
+    await authClient.signUp.email({
+      email: "[email protected]",
+      password: "test123",
+      name: "Test User"
+    });
+    ```
+  </Step>
+  
+  <Step title="Check the role">
+    ```ts
+    const session = await authClient.getSession();
+    console.log(session?.user.role); // Should be "user"
+    ```
+  </Step>
+</Steps>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Configuration" icon="gear" href="/advanced/configuration">
+    Explore all available configuration options
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/invite">
+    Complete API documentation for all endpoints
+  </Card>
+  
+  <Card title="Hooks" icon="webhook" href="/guides/hooks-and-callbacks">
+    Customize behavior with lifecycle hooks
+  </Card>
+  
+  <Card title="Examples" icon="book" href="/examples/simple-invitation">
+    See real-world implementation examples
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

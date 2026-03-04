@@ -1,0 +1,337 @@
+---
+title: inviteClient()
+description: Client plugin for Better Auth Invite functionality
+---
+
+## Overview
+
+The `inviteClient` function is the client-side plugin that enables invite functionality in your Better Auth client. It provides type-safe methods for creating, activating, canceling, and managing invitations from your frontend application.
+
+## Import
+
+```typescript
+import { inviteClient } from "@better-auth/invite/client";
+```
+
+## Signature
+
+```typescript
+function inviteClient(): BetterAuthClientPlugin
+```
+
+## Returns
+
+<ResponseField name="BetterAuthClientPlugin" type="object">
+  A Better Auth client plugin object containing:
+  
+  <Expandable title="Plugin Structure">
+    <ResponseField name="id" type="string">
+      Plugin identifier: `"invite"`
+    </ResponseField>
+    
+    <ResponseField name="$InferServerPlugin" type="ReturnType<typeof invite>">
+      Type inference for the server plugin, enabling full type safety between client and server
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Setup
+
+### Client Configuration
+
+```typescript
+import { createAuthClient } from "better-auth/client";
+import { inviteClient } from "@better-auth/invite/client";
+
+const authClient = createAuthClient({
+  baseURL: "http://localhost:3000",
+  plugins: [inviteClient()],
+});
+
+export default authClient;
+```
+
+## Available Methods
+
+Once the client plugin is configured, the following methods are available on your auth client:
+
+### createInvite
+
+Create a new invitation.
+
+```typescript
+const result = await authClient.invite.createInvite({
+  email: "user@example.com",
+  role: "member",
+  tokenType: "code",
+  maxUses: 1,
+});
+```
+
+**Parameters:**
+- `email` (string, optional): Email address for private invite
+- `role` (string, required): Role to assign to the invited user
+- `tokenType` ("token" | "code" | "custom", optional): Type of token to generate
+- `redirectToSignUp` (string, optional): Custom sign-up redirect URL
+- `redirectToSignIn` (string, optional): Custom sign-in redirect URL
+- `maxUses` (number, optional): Maximum number of times invite can be used
+- `expiresIn` (number, optional): Seconds until token expires
+- `redirectToAfterUpgrade` (string, optional): Redirect URL after role upgrade
+- `shareInviterName` (boolean, optional): Share inviter's name with invitee
+- `senderResponse` ("token" | "url", optional): How to return the token (public invites only)
+- `senderResponseRedirect` ("signUp" | "signIn", optional): Where to redirect (public invites only)
+- `customInviteUrl` (string, optional): Custom invitation URL pattern
+
+**Returns:**
+```typescript
+{
+  status: boolean;
+  message: string; // Contains token/URL for public invites, or confirmation for private invites
+}
+```
+
+### activateInvite
+
+Activate an invitation token.
+
+```typescript
+const result = await authClient.invite.activateInvite({
+  token: "invite-token-here",
+  callbackURL: "/dashboard",
+});
+```
+
+**Parameters:**
+- `token` (string, required): The invitation token to activate
+- `callbackURL` (string, optional): Where to redirect after activation
+
+**Returns:**
+```typescript
+{
+  status: boolean;
+  message: string;
+  action?: "SIGN_IN_UP_REQUIRED";
+  redirectTo?: string;
+}
+```
+
+### getInvite
+
+Get details about an invitation.
+
+```typescript
+const result = await authClient.invite.getInvite({
+  token: "invite-token-here",
+});
+```
+
+**Parameters:**
+- `token` (string, required): The invitation token to look up
+
+**Returns:**
+```typescript
+{
+  status: boolean;
+  inviter: {
+    email: string;
+    name: string | null;
+    image: string | null;
+  };
+  invitation: {
+    email: string | null;
+    createdAt: Date;
+    role: string;
+    newAccount: boolean;
+  };
+}
+```
+
+### cancelInvite
+
+Cancel a pending invitation (only the creator can cancel).
+
+```typescript
+const result = await authClient.invite.cancelInvite({
+  token: "invite-token-here",
+});
+```
+
+**Parameters:**
+- `token` (string, required): The invitation token to cancel
+
+**Returns:**
+```typescript
+{
+  status: boolean;
+  message: string;
+}
+```
+
+### rejectInvite
+
+Reject a private invitation (only the invitee can reject).
+
+```typescript
+const result = await authClient.invite.rejectInvite({
+  token: "invite-token-here",
+});
+```
+
+**Parameters:**
+- `token` (string, required): The invitation token to reject
+
+**Returns:**
+```typescript
+{
+  status: boolean;
+  message: string;
+}
+```
+
+## Usage Examples
+
+### Creating Private Invites
+
+```typescript
+// Invite a specific user by email
+const { status, message } = await authClient.invite.createInvite({
+  email: "newuser@example.com",
+  role: "editor",
+  shareInviterName: true,
+});
+
+if (status) {
+  console.log("Invitation sent!");
+}
+```
+
+### Creating Public Invites
+
+```typescript
+// Create a public invite link (no email)
+const { status, message } = await authClient.invite.createInvite({
+  role: "member",
+  maxUses: 10,
+  senderResponse: "url",
+});
+
+if (status) {
+  // message contains the full invitation URL
+  console.log("Share this link:", message);
+}
+```
+
+### Handling Invite Activation
+
+```typescript
+// Activate an invite from URL parameter
+const params = new URLSearchParams(window.location.search);
+const token = params.get('token');
+
+if (token) {
+  try {
+    const result = await authClient.invite.activateInvite({
+      token,
+      callbackURL: window.location.origin + '/dashboard',
+    });
+    
+    if (result.action === 'SIGN_IN_UP_REQUIRED') {
+      // Redirect to sign in/up
+      window.location.href = result.redirectTo;
+    } else {
+      // Already logged in, role upgraded
+      window.location.href = result.redirectTo || '/dashboard';
+    }
+  } catch (error) {
+    console.error('Invalid or expired invite');
+  }
+}
+```
+
+### Displaying Invite Details
+
+```typescript
+// Show invite information before accepting
+const token = params.get('token');
+
+if (token) {
+  try {
+    const { inviter, invitation } = await authClient.invite.getInvite({ token });
+    
+    // Display to user
+    console.log(`${inviter.name} invited you to join as ${invitation.role}`);
+    
+    if (invitation.newAccount) {
+      console.log('You will need to create a new account');
+    } else {
+      console.log('Your existing account will be upgraded');
+    }
+  } catch (error) {
+    console.error('Could not fetch invite details');
+  }
+}
+```
+
+### Managing Invitations
+
+```typescript
+// Cancel an invite you created
+try {
+  await authClient.invite.cancelInvite({ token: inviteToken });
+  console.log('Invitation cancelled');
+} catch (error) {
+  console.error('Could not cancel invitation');
+}
+
+// Reject an invite you received
+try {
+  await authClient.invite.rejectInvite({ token: inviteToken });
+  console.log('Invitation rejected');
+} catch (error) {
+  console.error('Could not reject invitation');
+}
+```
+
+## Error Handling
+
+```typescript
+try {
+  await authClient.invite.createInvite({
+    email: "user@example.com",
+    role: "admin",
+  });
+} catch (error) {
+  if (error.errorCode === "INSUFFICIENT_PERMISSIONS") {
+    console.error("You don't have permission to create invites");
+  } else if (error.errorCode === "INVALID_TOKEN") {
+    console.error("Invalid or expired invite token");
+  } else {
+    console.error("An error occurred:", error.message);
+  }
+}
+```
+
+## Type Safety
+
+The client plugin automatically infers types from your server configuration:
+
+```typescript
+import type { InviteClientPlugin } from "@better-auth/invite/client";
+
+// Types are automatically inferred
+type AuthClient = typeof authClient;
+type InviteMethods = AuthClient["invite"];
+```
+
+## Source Code Reference
+
+Implementation: `src/client.ts:4-9`
+
+## Related
+
+- [invite()](/api/invite) - Server plugin configuration
+- [Create Invite Endpoint](/api/endpoints/create-invite) - API endpoint details
+- [Activate Invite Endpoint](/api/endpoints/activate-invite) - API endpoint details
+- [Get Invite Endpoint](/api/endpoints/get-invite) - API endpoint details
+- [Cancel Invite Endpoint](/api/endpoints/cancel-invite) - API endpoint details
+- [Reject Invite Endpoint](/api/endpoints/reject-invite) - API endpoint details

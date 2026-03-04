@@ -1,0 +1,478 @@
+---
+title: Security
+description: Security features and best practices for the invite plugin
+---
+
+The invite plugin implements multiple security layers to protect against unauthorized access and abuse.
+
+## Token Security
+
+### Token Generation
+
+The plugin uses cryptographically secure token generators from Better Auth:
+
+<CodeGroup>
+```ts Token (Default)
+// 24-character secure ID
+generateId(24)
+// Example: a1b2c3d4e5f6g7h8i9j0k1l2
+```
+
+```ts Code
+// 6-character alphanumeric code
+generateRandomString(6, "0-9", "A-Z")
+// Example: A1B2C3
+```
+
+```ts Custom
+// Your implementation
+generateToken: () => crypto.randomUUID()
+// Example: 550e8400-e29b-41d4-a716-446655440000
+```
+</CodeGroup>
+
+<Note>
+See [Custom Tokens](/advanced/custom-tokens) for implementing your own token generator.
+</Note>
+
+### Token Uniqueness
+
+Tokens are enforced as unique at the database level (`src/schema.ts:6`):
+
+```ts
+token: { type: "string", unique: true }
+```
+
+This prevents duplicate tokens and ensures each invitation has a unique identifier.
+
+### Secure Fallback
+
+If you configure `defaultTokenType: 'custom'` without providing a `generateToken` function, the plugin falls back to the secure default token generator (`src/utils.ts:79`):
+
+```ts
+custom: () => generateId(24), // secure fallback
+```
+
+## Token Expiration
+
+### Expiration Time
+
+Tokens automatically expire after a configured duration:
+
+<ParamField path="invitationTokenExpiresIn" type="number" default="3600">
+  Token expiration time in seconds (default: 1 hour).
+</ParamField>
+
+```ts
+invite({
+  invitationTokenExpiresIn: 60 * 60 * 24 // 24 hours
+})
+```
+
+### Expiration Validation
+
+The plugin validates token expiration when accepting invites (`src/utils.ts:118-120`):
+
+```ts
+if (invitation.status !== "pending" && invitation.status !== undefined) {
+  throw error("BAD_REQUEST", ERROR_CODES.INVALID_TOKEN, "INVALID_TOKEN");
+}
+```
+
+Expired tokens receive the error code `INVALID_OR_EXPIRED_INVITE` from `src/constants.ts:9`.
+
+## Cookie Security
+
+### Invite Cookie
+
+When users are not logged in, the plugin stores the invite token in a secure cookie (`src/constants.ts:21`):
+
+```ts
+export const INVITE_COOKIE_NAME = "invite_token";
+```
+
+### Cookie Max Age
+
+The cookie has a configurable maximum age:
+
+<ParamField path="inviteCookieMaxAge" type="number" default="600">
+  Cookie max age in seconds (default: 10 minutes).
+</ParamField>
+
+```ts
+invite({
+  inviteCookieMaxAge: 600 // 10 minutes
+})
+```
+
+This controls how long users have to complete the login flow before the cookie expires.
+
+### Cookie Attributes
+
+Better Auth sets secure cookie attributes automatically:
+- `HttpOnly`: Prevents JavaScript access
+- `Secure`: Only transmitted over HTTPS (in production)
+- `SameSite`: Protects against CSRF attacks
+
+## Permission Checks
+
+The plugin implements role-based permission checks for all operations.
+
+### Can Create Invite
+
+Verifies if a user can create invitations (`src/types.ts:23-32`):
+
+```ts
+invite({
+  canCreateInvite: async ({ invitedUser, inviterUser, ctx }) => {
+    // Only admins can create invites
+    return inviterUser.role === 'admin';
+  }
+})
+```
+
+**Error code:** `INSUFFICIENT_PERMISSIONS` (`src/constants.ts:5-6`)
+
+### Can Accept Invite
+
+Verifies if a user can accept an invitation (`src/types.ts:46-51` and `src/utils.ts:122-137`):
+
+```ts
+const canAcceptInviteOptions =
+  typeof options.canAcceptInvite === "function"
+    ? await options.canAcceptInvite({ invitedUser, newAccount })
+    : options.canAcceptInvite;
+const canAcceptInvite =
+  typeof canAcceptInviteOptions === "object"
+    ? await exports.checkPermissions(ctx, canAcceptInviteOptions)
+    : canAcceptInviteOptions;
+
+if (!canAcceptInvite) {
+  throw error(
+    "BAD_REQUEST",
+    ERROR_CODES.CANT_ACCEPT_INVITE,
+    "CANT_ACCEPT_INVITE",
+  );
+}
+```
+
+**Error code:** `CANT_ACCEPT_INVITE` (`src/constants.ts:12`)
+
+### Can Cancel Invite
+
+Only the user who created the invitation can cancel it (`src/types.ts:54-68`):
+
+```ts
+invite({
+  canCancelInvite: async ({ inviterUser, invitation, ctx }) => {
+    // Additional permission check
+    return inviterUser.role === 'admin';
+  }
+})
+```
+
+### Can Reject Invite
+
+Only the invitee can reject a private invitation (`src/types.ts:69-84`):
+
+```ts
+invite({
+  canRejectInvite: async ({ inviteeUser, invitation, ctx }) => {
+    // Additional permission check
+    return true;
+  }
+})
+```
+
+**Error code:** `CANT_REJECT_INVITE` (`src/constants.ts:13`)
+
+### Admin Plugin Integration
+
+Permission checks can integrate with the Better Auth admin plugin (`src/utils.ts:245-279`):
+
+```ts
+export const checkPermissions = async (
+  ctx: GenericEndpointContext,
+  permissions: Permissions,
+) => {
+  const session = ctx.context.session;
+  if (!session?.session) {
+    throw ctx.error("UNAUTHORIZED");
+  }
+
+  const adminPlugin = getPlugin<AdminPlugin>(
+    "admin" satisfies AdminPlugin["id"],
+    ctx.context,
+  );
+
+  if (!adminPlugin) {
+    ctx.context.logger.error("Admin plugin is not set-up.");
+    throw ctx.error("FAILED_DEPENDENCY", {
+      message: ERROR_CODES.ADMIN_PLUGIN_IS_NOT_SET_UP,
+    });
+  }
+
+  try {
+    return await adminPlugin.endpoints.userHasPermission({
+      ...ctx,
+      body: {
+        userId: session.user.id,
+        permissions: { [permissions.statement]: permissions.permissions },
+      },
+      returnHeaders: true,
+    });
+  } catch {
+    return false;
+  }
+};
+```
+
+Example with admin plugin:
+
+```ts
+invite({
+  canCreateInvite: {
+    statement: 'invites',
+    permissions: ['create']
+  }
+})
+```
+
+**Error code:** `ADMIN_PLUGIN_IS_NOT_SET_UP` (`src/constants.ts:16`)
+
+## Email Validation
+
+Private invitations validate that the accepting user's email matches the invitation (`src/utils.ts:114-116`):
+
+```ts
+if (invitation.email && invitation.email !== invitedUser.email) {
+  throw error("BAD_REQUEST", ERROR_CODES.INVALID_EMAIL, "INVALID_EMAIL");
+}
+```
+
+**Error code:** `INVALID_EMAIL` (`src/constants.ts:11`)
+
+## Status Validation
+
+The plugin enforces invitation status before acceptance (`src/utils.ts:118-120`):
+
+```ts
+if (invitation.status !== "pending" && invitation.status !== undefined) {
+  throw error("BAD_REQUEST", ERROR_CODES.INVALID_TOKEN, "INVALID_TOKEN");
+}
+```
+
+Only invitations with `status: 'pending'` can be accepted. Other statuses include:
+- `rejected`: Invitation was rejected
+- `canceled`: Invitation was canceled
+- `used`: Invitation reached max uses
+
+## Usage Limits
+
+### Max Uses
+
+Invitations have configurable usage limits:
+
+```ts
+invite({
+  defaultMaxUses: 10 // Allow 10 acceptances
+})
+```
+
+**Default:**
+- Private invites: 1 use
+- Public invites: Infinite uses
+
+### Usage Tracking
+
+The plugin tracks usage in the `inviteUse` table and validates limits before acceptance (`src/constants.ts:8`):
+
+```ts
+NO_USES_LEFT_FOR_INVITE: "No uses left for this invite"
+```
+
+## Error Codes Reference
+
+All error codes from `src/constants.ts:3-17`:
+
+<ResponseField name="USER_NOT_LOGGED_IN" type="string">
+  User must be logged in to create an invite
+</ResponseField>
+
+<ResponseField name="INSUFFICIENT_PERMISSIONS" type="string">
+  User does not have sufficient permissions to create invite
+</ResponseField>
+
+<ResponseField name="NO_SUCH_USER" type="string">
+  No such user
+</ResponseField>
+
+<ResponseField name="NO_USES_LEFT_FOR_INVITE" type="string">
+  No uses left for this invite
+</ResponseField>
+
+<ResponseField name="INVALID_OR_EXPIRED_INVITE" type="string">
+  Invalid or expired invite code
+</ResponseField>
+
+<ResponseField name="INVALID_TOKEN" type="string">
+  Invalid or non-existent token
+</ResponseField>
+
+<ResponseField name="INVALID_EMAIL" type="string">
+  This token is for a specific email, this is not it
+</ResponseField>
+
+<ResponseField name="CANT_ACCEPT_INVITE" type="string">
+  You cannot accept this invite
+</ResponseField>
+
+<ResponseField name="CANT_REJECT_INVITE" type="string">
+  You cannot reject this invite
+</ResponseField>
+
+<ResponseField name="INVITER_NOT_FOUND" type="string">
+  Inviter not found
+</ResponseField>
+
+<ResponseField name="ERROR_SENDING_THE_INVITATION_EMAIL" type="string">
+  Error sending the invitation email
+</ResponseField>
+
+<ResponseField name="ADMIN_PLUGIN_IS_NOT_SET_UP" type="string">
+  Admin plugin is not set-up
+</ResponseField>
+
+## Best Practices
+
+### 1. Use Short Expiration Times
+
+Set appropriate token expiration based on your use case:
+
+<CodeGroup>
+```ts High Security
+invite({
+  invitationTokenExpiresIn: 60 * 15 // 15 minutes
+})
+```
+
+```ts Standard
+invite({
+  invitationTokenExpiresIn: 60 * 60 // 1 hour (default)
+})
+```
+
+```ts Extended
+invite({
+  invitationTokenExpiresIn: 60 * 60 * 24 // 24 hours
+})
+```
+</CodeGroup>
+
+### 2. Implement Permission Checks
+
+Always verify user permissions before allowing invite operations:
+
+```ts
+invite({
+  canCreateInvite: async ({ inviterUser }) => {
+    return inviterUser.role === 'admin' || inviterUser.role === 'manager';
+  },
+  canAcceptInvite: async ({ invitedUser, newAccount }) => {
+    // Additional validation logic
+    return true;
+  }
+})
+```
+
+### 3. Enable Cleanup
+
+Clean up expired and used invitations:
+
+```ts
+invite({
+  cleanupInvitesAfterMaxUses: true,
+  cleanupInvitesOnDecision: true
+})
+```
+
+### 4. Use Private Invitations
+
+For sensitive operations, always use email-specific invitations:
+
+```ts
+const { data } = await authClient.invite.create({
+  email: 'user@example.com', // Private invitation
+  role: 'admin'
+});
+```
+
+### 5. Monitor Failed Attempts
+
+Use hooks to monitor and log failed invitation attempts:
+
+```ts
+invite({
+  inviteHooks: {
+    beforeAcceptInvite: async ({ ctx, invitedUser }) => {
+      console.log(`User ${invitedUser.email} attempting to accept invite`);
+    }
+  }
+})
+```
+
+### 6. Validate Tokens Server-Side
+
+Always validate tokens on the server. Never trust client-side validation:
+
+```ts
+// Good: Server-side validation
+const invitation = await authClient.invite.getByToken({
+  token: tokenFromUrl
+});
+
+if (!invitation || invitation.status !== 'pending') {
+  throw new Error('Invalid invitation');
+}
+```
+
+### 7. Use HTTPS
+
+Always serve your application over HTTPS in production to protect tokens in transit:
+
+```ts
+// Better Auth automatically enables secure cookies over HTTPS
+export const auth = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL, // Use https:// in production
+  // ...
+});
+```
+
+## Security Checklist
+
+<Steps>
+  <Step title="Configure token expiration">
+    Set `invitationTokenExpiresIn` based on your security requirements.
+  </Step>
+  <Step title="Implement permission checks">
+    Configure `canCreateInvite`, `canAcceptInvite`, `canCancelInvite`, and `canRejectInvite`.
+  </Step>
+  <Step title="Use secure token generation">
+    Use cryptographically secure generators (built-in or custom).
+  </Step>
+  <Step title="Enable cleanup">
+    Set `cleanupInvitesAfterMaxUses` and `cleanupInvitesOnDecision` to `true`.
+  </Step>
+  <Step title="Validate email for private invites">
+    Always include an email address for sensitive role assignments.
+  </Step>
+  <Step title="Monitor invitation usage">
+    Use hooks and callbacks to track invitation activity.
+  </Step>
+  <Step title="Serve over HTTPS">
+    Ensure your application uses HTTPS in production.
+  </Step>
+  <Step title="Set appropriate cookie max age">
+    Configure `inviteCookieMaxAge` for your login flow duration.
+  </Step>
+</Steps>
