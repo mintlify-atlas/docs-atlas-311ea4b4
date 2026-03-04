@@ -115,8 +115,8 @@ The `NewInviteOptions` type is used internally after applying defaults from `res
 ### Basic Configuration
 
 ```typescript
-import { invite } from "@better-auth/invite";
-import type { InviteOptions } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
+import type { InviteOptions } from "better-auth-invite-plugin";
 
 const inviteOptions: InviteOptions = {
   sendUserInvitation: async (data) => {
@@ -136,7 +136,7 @@ const auth = betterAuth({
 ### With Type Safety
 
 ```typescript
-import type { InviteOptions } from "@better-auth/invite";
+import type { InviteOptions } from "better-auth-invite-plugin";
 
 const createInviteConfig = (): InviteOptions => {
   return {
@@ -157,7 +157,7 @@ const createInviteConfig = (): InviteOptions => {
 ### Extending with Custom Schema
 
 ```typescript
-import type { InviteOptions } from "@better-auth/invite";
+import type { InviteOptions } from "better-auth-invite-plugin";
 import type { InferOptionSchema } from "better-auth/plugins";
 
 const inviteOptions: InviteOptions = {

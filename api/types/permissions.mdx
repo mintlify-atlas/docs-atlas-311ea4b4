@@ -49,8 +49,8 @@ The `Permissions` type can be used with any of the `can*` options in `InviteOpti
 ### Basic Permission Configuration
 
 ```typescript
-import { invite } from "@better-auth/invite";
-import type { Permissions } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
+import type { Permissions } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   plugins: [
@@ -72,7 +72,7 @@ const auth = betterAuth({
 ### Multiple Roles
 
 ```typescript
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   plugins: [
@@ -100,8 +100,8 @@ const auth = betterAuth({
 ### All Permission Options
 
 ```typescript
-import { invite } from "@better-auth/invite";
-import type { Permissions } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
+import type { Permissions } from "better-auth-invite-plugin";
 
 const createPermission: Permissions = {
   statement: "user:invite:create",
@@ -208,7 +208,7 @@ canCreateInvite: {
 ### Hierarchical Permissions
 
 ```typescript
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   plugins: [
@@ -242,7 +242,7 @@ const auth = betterAuth({
 ### Team-based Permissions
 
 ```typescript
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   plugins: [
@@ -270,7 +270,7 @@ const auth = betterAuth({
 ### Mixed Approach
 
 ```typescript
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   plugins: [
@@ -321,7 +321,7 @@ This works seamlessly with Better Auth's role system. Make sure you have the rol
 
 ```typescript
 import { betterAuth } from "better-auth";
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   // ... other config

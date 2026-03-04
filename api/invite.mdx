@@ -10,7 +10,7 @@ The `invite` function is the main server plugin function that adds invitation fu
 ## Import
 
 ```typescript
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 ```
 
 ## Signature
@@ -65,7 +65,7 @@ function invite<O extends InviteOptions>(opts: O): BetterAuthPlugin
 
 ```typescript
 import { betterAuth } from "better-auth";
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   plugins: [
@@ -87,7 +87,7 @@ const auth = betterAuth({
 
 ```typescript
 import { betterAuth } from "better-auth";
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   plugins: [
@@ -136,7 +136,7 @@ const auth = betterAuth({
 
 ```typescript
 import { betterAuth } from "better-auth";
-import { invite } from "@better-auth/invite";
+import { invite } from "better-auth-invite-plugin";
 
 const auth = betterAuth({
   plugins: [
