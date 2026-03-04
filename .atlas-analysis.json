@@ -1,0 +1,130 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Better Auth Invite Plugin",
+  "projectDescription": "A plugin for Better Auth that adds an invitation system for managing user sign-ups and role upgrades.",
+  "theme": "palm",
+  "primaryColor": "#3B82F6",
+  "lightColor": "#60A5FA",
+  "darkColor": "#2563EB",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/how-it-works",
+              "concepts/invitation-types",
+              "concepts/token-types",
+              "concepts/permissions"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/server-setup",
+              "guides/client-setup",
+              "guides/creating-invites",
+              "guides/activating-invites",
+              "guides/managing-invites",
+              "guides/email-integration",
+              "guides/hooks-and-callbacks"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/configuration",
+              "advanced/custom-tokens",
+              "advanced/database-schema",
+              "advanced/security"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Server Plugin",
+            "pages": [
+              "api/invite",
+              "api/options"
+            ]
+          },
+          {
+            "group": "Client Plugin",
+            "pages": [
+              "api/invite-client"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/endpoints/create-invite",
+              "api/endpoints/activate-invite",
+              "api/endpoints/get-invite",
+              "api/endpoints/cancel-invite",
+              "api/endpoints/reject-invite"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/invite-options",
+              "api/types/invite-type",
+              "api/types/permissions"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Use Cases",
+            "pages": [
+              "examples/simple-invitation",
+              "examples/role-based-invites",
+              "examples/custom-email-handler",
+              "examples/public-invite-codes",
+              "examples/invite-dashboard"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Create and manage invitation codes for controlled user sign-ups",
+    "Send invitations via email with customizable handlers",
+    "Automatically assign or upgrade user roles when invites are used",
+    "Track invitation usage and enforce maximum uses per invite",
+    "Support multiple token types (default, code, custom)",
+    "Store tokens securely in browser cookies for seamless activation",
+    "Comprehensive hooks system for customizing behavior",
+    "Built-in permission system for invite operations",
+    "Separate private and public invitation modes"
+  ],
+  "publicApiSurface": [
+    "invite() - Server plugin function",
+    "inviteClient() - Client plugin function",
+    "POST /invite/create - Create an invitation",
+    "POST /invite/activate - Activate an invitation token",
+    "GET /invite/get - Get invitation details",
+    "POST /invite/cancel - Cancel an invitation",
+    "POST /invite/reject - Reject an invitation",
+    "InviteOptions - Plugin configuration type",
+    "InviteType - Invitation data type",
+    "InviteSchema - Database schema definition"
+  ]
+}
